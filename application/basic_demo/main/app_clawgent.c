@@ -20,6 +20,7 @@
 #include "cap_lua.h"
 #include "cap_mcp_client.h"
 #include "cap_mcp_server.h"
+#include "cap_session_mng.h"
 #include "cap_skill.h"
 #include "cap_time.h"
 #include "cap_web_search.h"
@@ -311,6 +312,9 @@ static esp_err_t init_capabilities(const basic_demo_settings_t *settings)
     ESP_RETURN_ON_ERROR(cap_web_search_register_group(),
                         TAG,
                         "Failed to register web search cap");
+    ESP_RETURN_ON_ERROR(cap_session_mng_register_group(),
+                        TAG,
+                        "Failed to register session manager cap");
     ESP_RETURN_ON_ERROR(claw_cap_set_llm_visible_groups(
                             BASIC_DEMO_LLM_VISIBLE_GROUPS,
                             sizeof(BASIC_DEMO_LLM_VISIBLE_GROUPS) /
@@ -362,6 +366,7 @@ esp_err_t app_clawgent_start(const basic_demo_settings_t *settings)
         .core_submit_timeout_ms = 1000,
         .core_receive_timeout_ms = 130000,
         .default_route_messages_to_agent = false,
+        .session_builder = cap_session_mng_build_session_id,
     };
     bool llm_enabled = false;
 
@@ -372,6 +377,9 @@ esp_err_t app_clawgent_start(const basic_demo_settings_t *settings)
     llm_enabled = basic_demo_llm_is_configured(settings);
     router_config.default_route_messages_to_agent = llm_enabled;
 
+    ESP_RETURN_ON_ERROR(cap_session_mng_set_session_root_dir(BASIC_DEMO_MEMORY_SESSION_ROOT),
+                        TAG,
+                        "Failed to configure session manager");
     ESP_RETURN_ON_ERROR(claw_event_router_init(&router_config),
                         TAG,
                         "Failed to init event router");

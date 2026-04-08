@@ -20,6 +20,7 @@ idf_component_register(
         cap_lua
         cap_mcp_client
         cap_mcp_server
+        cap_session_mng
         cap_skill
         cap_time
         cap_web_search

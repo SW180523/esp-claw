@@ -1,5 +1,33 @@
 [
   {
+    "id": "im_new_session",
+    "description": "Start a fresh persistent chat session when the user sends /new.",
+    "enabled": true,
+    "consume_on_match": true,
+    "ack": "{{event.source_channel}} new session started",
+    "match": {
+      "event_type": "message",
+      "event_key": "text",
+      "content_type": "text",
+      "text": "/new"
+    },
+    "actions": [
+      {
+        "type": "call_cap",
+        "cap": "roll_chat_session",
+        "input": {}
+      },
+      {
+        "type": "send_message",
+        "input": {
+          "channel": "{{event.source_channel}}",
+          "chat_id": "{{event.chat_id}}",
+          "message": "Started a new session."
+        }
+      }
+    ]
+  },
+  {
     "id": "im_hello_clawgent",
     "description": "Intercept IM hello! clawgent and reply directly.Just for demonstration",
     "enabled": true,
