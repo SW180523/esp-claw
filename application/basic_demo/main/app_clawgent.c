@@ -185,6 +185,13 @@ static esp_err_t init_capabilities(const basic_demo_settings_t *settings)
     }),
     TAG,
     "Failed to whitelist event_router");
+    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
+        .command_name = "lua",
+        .description = "List, write, and run managed Lua scripts",
+        .usage_hint = "lua --run --path hello.lua",
+    }),
+    TAG,
+    "Failed to whitelist lua");
     ESP_RETURN_ON_ERROR(cap_time_set_timezone(settings->time_timezone),
                         TAG,
                         "Failed to set time cap timezone");

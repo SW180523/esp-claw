@@ -10,13 +10,13 @@
       "id": "lua_write",
       "file": "lua_write.md",
       "title": "Lua Script Authoring",
-      "summary": "Write managed Lua scripts with the correct runtime modules, path rules, and syntax constraints."
+      "summary": "Describe how to write a Lua file, must be activate before edit a lua file."
     },
     {
       "id": "lua_run",
       "file": "lua_run.md",
       "title": "Lua Script Execution",
-      "summary": "List and run managed Lua scripts, including async execution and job inspection."
+      "summary": "Describe how to run a lua file, must be activate before running lua."
     },
     {
       "id": "im_send_file",

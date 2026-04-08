@@ -161,7 +161,7 @@ void register_cap_lua(void)
         " lua --base-dir\n"
         " lua --list\n"
         " lua --write --path blink.lua --content \"print('hi')\"\n"
-        " lua --run --path blink.lua --args-json '{\"pin\":2}' --timeout-ms 3000\n"
+        " lua --run --path blink.lua --args-json \"{\\\"pin\\\":2}\" --timeout-ms 3000\n"
         " lua --run-async --path blink.lua\n"
         " lua --jobs --status running\n"
         " lua --job abcdef12\n",
