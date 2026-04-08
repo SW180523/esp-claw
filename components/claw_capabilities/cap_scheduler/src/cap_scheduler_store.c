@@ -1,5 +1,6 @@
 #include "cap_scheduler_internal.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,6 +53,10 @@ static esp_err_t cap_scheduler_read_file(const char *path, char **out_buf)
 static esp_err_t cap_scheduler_ensure_parent_dir(const char *path)
 {
     char buf[256];
+    char *cursor = NULL;
+    char *slash = NULL;
+    char *create_from = NULL;
+    struct stat st = {0};
     size_t len;
 
     if (!path || !path[0]) {
@@ -59,16 +64,41 @@ static esp_err_t cap_scheduler_ensure_parent_dir(const char *path)
     }
 
     strlcpy(buf, path, sizeof(buf));
+    slash = strrchr(buf, '/');
+    if (!slash) {
+        return ESP_OK;
+    }
+    *slash = '\0';
     len = strlen(buf);
-    for (size_t i = 1; i < len; i++) {
-        if (buf[i] != '/') {
+
+    for (cursor = buf + 1; *cursor; cursor++) {
+        if (*cursor != '/') {
             continue;
         }
-        buf[i] = '\0';
+        *cursor = '\0';
+        if (stat(buf, &st) == 0 && S_ISDIR(st.st_mode)) {
+            create_from = cursor + 1;
+        }
+        *cursor = '/';
+    }
+
+    if (!create_from) {
+        return ESP_FAIL;
+    }
+
+    for (cursor = create_from; *cursor; cursor++) {
+        if (*cursor != '/') {
+            continue;
+        }
+        *cursor = '\0';
         if (mkdir(buf, 0755) != 0 && errno != EEXIST) {
             return ESP_FAIL;
         }
-        buf[i] = '/';
+        *cursor = '/';
+    }
+
+    if (len > 0 && mkdir(buf, 0755) != 0 && errno != EEXIST) {
+        return ESP_FAIL;
     }
     return ESP_OK;
 }
@@ -94,6 +124,109 @@ static esp_err_t cap_scheduler_write_file(const char *path, const char *content)
     }
     fclose(file);
     return ESP_OK;
+}
+
+static char *cap_scheduler_normalize_payload_json_field(const char *json)
+{
+    const char *field = "\"payload_json\"";
+    const char *field_pos = NULL;
+    const char *cursor = NULL;
+    const char *value_quote = NULL;
+    const char *obj_start = NULL;
+    const char *obj_end = NULL;
+    const char *closing_quote = NULL;
+    bool in_string = false;
+    bool escape = false;
+    int depth = 0;
+    size_t prefix_len;
+    size_t obj_len;
+    size_t suffix_len;
+    char *normalized = NULL;
+
+    if (!json) {
+        return NULL;
+    }
+
+    field_pos = strstr(json, field);
+    if (!field_pos) {
+        return NULL;
+    }
+
+    cursor = field_pos + strlen(field);
+    while (*cursor && isspace((unsigned char)*cursor)) {
+        cursor++;
+    }
+    if (*cursor != ':') {
+        return NULL;
+    }
+    cursor++;
+    while (*cursor && isspace((unsigned char)*cursor)) {
+        cursor++;
+    }
+    if (*cursor != '"') {
+        return NULL;
+    }
+
+    value_quote = cursor;
+    cursor++;
+    if (*cursor != '{') {
+        return NULL;
+    }
+
+    obj_start = cursor;
+    for (; *cursor; cursor++) {
+        char ch = *cursor;
+
+        if (in_string) {
+            if (escape) {
+                escape = false;
+            } else if (ch == '\\') {
+                escape = true;
+            } else if (ch == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if (ch == '"') {
+            in_string = true;
+            continue;
+        }
+        if (ch == '{') {
+            depth++;
+            continue;
+        }
+        if (ch == '}') {
+            depth--;
+            if (depth == 0) {
+                obj_end = cursor;
+                break;
+            }
+        }
+    }
+
+    if (!obj_end || depth != 0) {
+        return NULL;
+    }
+
+    closing_quote = obj_end + 1;
+    if (*closing_quote != '"') {
+        return NULL;
+    }
+
+    prefix_len = (size_t)(value_quote - json);
+    obj_len = (size_t)(obj_end - obj_start + 1);
+    suffix_len = strlen(closing_quote + 1);
+
+    normalized = calloc(1, prefix_len + obj_len + suffix_len + 1);
+    if (!normalized) {
+        return NULL;
+    }
+
+    memcpy(normalized, json, prefix_len);
+    memcpy(normalized + prefix_len, obj_start, obj_len);
+    memcpy(normalized + prefix_len + obj_len, closing_quote + 1, suffix_len);
+    return normalized;
 }
 
 static const char *cap_scheduler_kind_to_string(cap_scheduler_item_kind_t kind)
@@ -268,6 +401,13 @@ static void cap_scheduler_parse_item_json(const cJSON *node,
     value = cJSON_GetObjectItemCaseSensitive(node, "payload_json");
     if (cJSON_IsString(value)) {
         strlcpy(item->payload_json, value->valuestring, sizeof(item->payload_json));
+    } else if (cJSON_IsObject(value)) {
+        char *rendered = cJSON_PrintUnformatted((cJSON *)value);
+
+        if (rendered) {
+            strlcpy(item->payload_json, rendered, sizeof(item->payload_json));
+            free(rendered);
+        }
     }
     value = cJSON_GetObjectItemCaseSensitive(node, "catch_up_policy");
     if (cJSON_IsString(value)) {
@@ -380,6 +520,68 @@ esp_err_t cap_scheduler_load_items(const char *path,
 
     cJSON_Delete(root);
     *out_count = count;
+    return ESP_OK;
+}
+
+esp_err_t cap_scheduler_parse_item_json_string(const char *json,
+                                               cap_scheduler_item_t *item,
+                                               const char *default_timezone)
+{
+    char *normalized_json = NULL;
+    char *fallback_json = NULL;
+    const char *parse_json = NULL;
+    const char *start = NULL;
+    const char *end = NULL;
+    cJSON *root = NULL;
+    esp_err_t err;
+
+    if (!json || !item) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    start = json;
+    while (*start && isspace((unsigned char)*start)) {
+        start++;
+    }
+    end = start + strlen(start);
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+
+    parse_json = start;
+    if ((end - start) >= 2 &&
+        ((start[0] == '\'' && end[-1] == '\'') || (start[0] == '"' && end[-1] == '"'))) {
+        size_t json_len = (size_t)(end - start - 2);
+
+        normalized_json = calloc(1, json_len + 1);
+        if (!normalized_json) {
+            return ESP_ERR_NO_MEM;
+        }
+        memcpy(normalized_json, start + 1, json_len);
+        parse_json = normalized_json;
+    }
+
+    root = cJSON_Parse(parse_json);
+    if (!root) {
+        fallback_json = cap_scheduler_normalize_payload_json_field(parse_json);
+        if (fallback_json) {
+            root = cJSON_Parse(fallback_json);
+        }
+    }
+    free(fallback_json);
+    free(normalized_json);
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    cap_scheduler_parse_item_json(root, item, default_timezone);
+    cJSON_Delete(root);
+
+    err = cap_scheduler_validate_item(item);
+    if (err != ESP_OK) {
+        return err;
+    }
     return ESP_OK;
 }
 

@@ -680,6 +680,7 @@ esp_err_t cap_scheduler_reload(void)
 esp_err_t cap_scheduler_add(const cap_scheduler_item_t *item)
 {
     ssize_t index;
+    esp_err_t err;
     int64_t now_ms = cap_scheduler_now_ms();
 
     if (!s_cap_scheduler.initialized || !item) {
@@ -707,14 +708,22 @@ esp_err_t cap_scheduler_add(const cap_scheduler_item_t *item)
         CAP_SCHEDULER_STATUS_SCHEDULED : CAP_SCHEDULER_STATUS_DISABLED;
     cap_scheduler_refresh_entry_locked(&s_cap_scheduler.entries[index], now_ms);
     s_cap_scheduler.item_count = cap_scheduler_active_count_locked();
-    cap_scheduler_persist_locked();
+    err = cap_scheduler_persist_locked();
+    if (err != ESP_OK) {
+        memset(&s_cap_scheduler.entries[index], 0, sizeof(s_cap_scheduler.entries[index]));
+        s_cap_scheduler.item_count = cap_scheduler_active_count_locked();
+        cap_scheduler_unlock();
+        return err;
+    }
     cap_scheduler_unlock();
     return ESP_OK;
 }
 
 esp_err_t cap_scheduler_update(const cap_scheduler_item_t *item)
 {
+    cap_scheduler_entry_t previous_entry;
     ssize_t index;
+    esp_err_t err;
     int64_t now_ms = cap_scheduler_now_ms();
 
     if (!s_cap_scheduler.initialized || !item) {
@@ -730,19 +739,27 @@ esp_err_t cap_scheduler_update(const cap_scheduler_item_t *item)
         cap_scheduler_unlock();
         return ESP_ERR_NOT_FOUND;
     }
+    previous_entry = s_cap_scheduler.entries[index];
     s_cap_scheduler.entries[index].item = *item;
     cap_scheduler_apply_defaults(&s_cap_scheduler.entries[index].item, s_cap_scheduler.default_timezone);
     if (s_cap_scheduler.entries[index].status != CAP_SCHEDULER_STATUS_PAUSED) {
         cap_scheduler_refresh_entry_locked(&s_cap_scheduler.entries[index], now_ms);
     }
-    cap_scheduler_persist_locked();
+    err = cap_scheduler_persist_locked();
+    if (err != ESP_OK) {
+        s_cap_scheduler.entries[index] = previous_entry;
+        cap_scheduler_unlock();
+        return err;
+    }
     cap_scheduler_unlock();
     return ESP_OK;
 }
 
 esp_err_t cap_scheduler_remove(const char *id)
 {
+    cap_scheduler_entry_t previous_entry;
     ssize_t index;
+    esp_err_t err;
 
     if (!s_cap_scheduler.initialized || !id || !id[0]) {
         return ESP_ERR_INVALID_ARG;
@@ -754,9 +771,16 @@ esp_err_t cap_scheduler_remove(const char *id)
         cap_scheduler_unlock();
         return ESP_ERR_NOT_FOUND;
     }
+    previous_entry = s_cap_scheduler.entries[index];
     memset(&s_cap_scheduler.entries[index], 0, sizeof(s_cap_scheduler.entries[index]));
     s_cap_scheduler.item_count = cap_scheduler_active_count_locked();
-    cap_scheduler_persist_locked();
+    err = cap_scheduler_persist_locked();
+    if (err != ESP_OK) {
+        s_cap_scheduler.entries[index] = previous_entry;
+        s_cap_scheduler.item_count = cap_scheduler_active_count_locked();
+        cap_scheduler_unlock();
+        return err;
+    }
     cap_scheduler_unlock();
     return ESP_OK;
 }
@@ -764,6 +788,8 @@ esp_err_t cap_scheduler_remove(const char *id)
 esp_err_t cap_scheduler_enable(const char *id, bool enabled)
 {
     ssize_t index;
+    cap_scheduler_entry_t previous_entry;
+    esp_err_t err;
     int64_t now_ms = cap_scheduler_now_ms();
 
     if (!s_cap_scheduler.initialized || !id || !id[0]) {
@@ -775,57 +801,25 @@ esp_err_t cap_scheduler_enable(const char *id, bool enabled)
         cap_scheduler_unlock();
         return ESP_ERR_NOT_FOUND;
     }
+    previous_entry = s_cap_scheduler.entries[index];
     s_cap_scheduler.entries[index].item.enabled = enabled;
     s_cap_scheduler.entries[index].status = enabled ?
         CAP_SCHEDULER_STATUS_SCHEDULED : CAP_SCHEDULER_STATUS_DISABLED;
     s_cap_scheduler.entries[index].last_error_code = ESP_OK;
     cap_scheduler_refresh_entry_locked(&s_cap_scheduler.entries[index], now_ms);
-    cap_scheduler_persist_locked();
+    err = cap_scheduler_persist_locked();
+    if (err != ESP_OK) {
+        s_cap_scheduler.entries[index] = previous_entry;
+        cap_scheduler_unlock();
+        return err;
+    }
     cap_scheduler_unlock();
     return ESP_OK;
 }
 
 esp_err_t cap_scheduler_pause(const char *id)
 {
-    ssize_t index;
-
-    if (!s_cap_scheduler.initialized || !id || !id[0]) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    cap_scheduler_lock();
-    index = cap_scheduler_find_entry_index_locked(id);
-    if (index < 0) {
-        cap_scheduler_unlock();
-        return ESP_ERR_NOT_FOUND;
-    }
-    s_cap_scheduler.entries[index].status = CAP_SCHEDULER_STATUS_PAUSED;
-    cap_scheduler_persist_locked();
-    cap_scheduler_unlock();
-    return ESP_OK;
-}
-
-esp_err_t cap_scheduler_resume(const char *id)
-{
-    ssize_t index;
-    int64_t now_ms = cap_scheduler_now_ms();
-
-    if (!s_cap_scheduler.initialized || !id || !id[0]) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    cap_scheduler_lock();
-    index = cap_scheduler_find_entry_index_locked(id);
-    if (index < 0) {
-        cap_scheduler_unlock();
-        return ESP_ERR_NOT_FOUND;
-    }
-    cap_scheduler_refresh_entry_locked(&s_cap_scheduler.entries[index], now_ms);
-    cap_scheduler_persist_locked();
-    cap_scheduler_unlock();
-    return ESP_OK;
-}
-
-esp_err_t cap_scheduler_trigger_now(const char *id)
-{
+    cap_scheduler_entry_t previous_entry;
     ssize_t index;
     esp_err_t err;
 
@@ -838,9 +832,70 @@ esp_err_t cap_scheduler_trigger_now(const char *id)
         cap_scheduler_unlock();
         return ESP_ERR_NOT_FOUND;
     }
-    err = cap_scheduler_publish_entry_locked(&s_cap_scheduler.entries[index], true, cap_scheduler_now_ms());
-    cap_scheduler_persist_locked();
+    previous_entry = s_cap_scheduler.entries[index];
+    s_cap_scheduler.entries[index].status = CAP_SCHEDULER_STATUS_PAUSED;
+    err = cap_scheduler_persist_locked();
+    if (err != ESP_OK) {
+        s_cap_scheduler.entries[index] = previous_entry;
+        cap_scheduler_unlock();
+        return err;
+    }
     cap_scheduler_unlock();
+    return ESP_OK;
+}
+
+esp_err_t cap_scheduler_resume(const char *id)
+{
+    ssize_t index;
+    cap_scheduler_entry_t previous_entry;
+    esp_err_t err;
+    int64_t now_ms = cap_scheduler_now_ms();
+
+    if (!s_cap_scheduler.initialized || !id || !id[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    cap_scheduler_lock();
+    index = cap_scheduler_find_entry_index_locked(id);
+    if (index < 0) {
+        cap_scheduler_unlock();
+        return ESP_ERR_NOT_FOUND;
+    }
+    previous_entry = s_cap_scheduler.entries[index];
+    cap_scheduler_refresh_entry_locked(&s_cap_scheduler.entries[index], now_ms);
+    err = cap_scheduler_persist_locked();
+    if (err != ESP_OK) {
+        s_cap_scheduler.entries[index] = previous_entry;
+        cap_scheduler_unlock();
+        return err;
+    }
+    cap_scheduler_unlock();
+    return ESP_OK;
+}
+
+esp_err_t cap_scheduler_trigger_now(const char *id)
+{
+    ssize_t index;
+    esp_err_t err;
+    esp_err_t persist_err;
+
+    if (!s_cap_scheduler.initialized || !id || !id[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    cap_scheduler_lock();
+    index = cap_scheduler_find_entry_index_locked(id);
+    if (index < 0) {
+        cap_scheduler_unlock();
+        return ESP_ERR_NOT_FOUND;
+    }
+    err = cap_scheduler_publish_entry_locked(&s_cap_scheduler.entries[index], true, cap_scheduler_now_ms());
+    persist_err = cap_scheduler_persist_locked();
+    cap_scheduler_unlock();
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (persist_err != ESP_OK) {
+        return persist_err;
+    }
     return err;
 }
 

@@ -5,9 +5,11 @@
  */
 #include "cmd_claw_event_router.h"
 
+#include <ctype.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "argtable3/argtable3.h"
 #include "cJSON.h"
@@ -34,16 +36,143 @@ static struct {
     struct arg_end *end;
 } router_args;
 
+static char *event_router_join_args_from(int argc, char **argv, int start_index)
+{
+    char *joined = NULL;
+    size_t joined_len = 0;
+
+    if (!argv || start_index >= argc) {
+        return NULL;
+    }
+
+    for (int i = start_index; i < argc; i++) {
+        joined_len += strlen(argv[i]) + 1;
+    }
+
+    joined = calloc(1, joined_len + 1);
+    if (!joined) {
+        return NULL;
+    }
+
+    for (int i = start_index; i < argc; i++) {
+        if (i > start_index) {
+            strcat(joined, " ");
+        }
+        strcat(joined, argv[i]);
+    }
+
+    return joined;
+}
+
+static char *event_router_dup_unwrapped_json(const char *value)
+{
+    const char *start = value;
+    const char *end = NULL;
+    size_t len;
+    char *copy = NULL;
+
+    if (!value) {
+        return NULL;
+    }
+
+    while (*start && isspace((unsigned char)*start)) {
+        start++;
+    }
+    end = start + strlen(start);
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+
+    if ((end - start) >= 2 &&
+        ((start[0] == '\'' && end[-1] == '\'') || (start[0] == '"' && end[-1] == '"'))) {
+        start++;
+        end--;
+    }
+
+    len = (size_t)(end - start);
+    copy = calloc(1, len + 1);
+    if (!copy) {
+        return NULL;
+    }
+    memcpy(copy, start, len);
+    return copy;
+}
+
+static esp_err_t event_router_prepare_argv(int argc,
+                                           char **argv,
+                                           int *out_argc,
+                                           char ***out_argv,
+                                           char **out_joined_value)
+{
+    int join_index = -1;
+    char **normalized_argv = NULL;
+
+    if (!argv || !out_argc || !out_argv || !out_joined_value) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *out_argc = argc;
+    *out_argv = argv;
+    *out_joined_value = NULL;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--add-rule-json") == 0 ||
+            strcmp(argv[i], "--update-rule-json") == 0 ||
+            strcmp(argv[i], "--text") == 0 ||
+            strcmp(argv[i], "--payload-json") == 0) {
+            join_index = i;
+        }
+    }
+
+    if (join_index < 0 || (join_index + 1) >= argc) {
+        return ESP_OK;
+    }
+
+    *out_joined_value = event_router_join_args_from(argc, argv, join_index + 1);
+    if (!*out_joined_value) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    normalized_argv = calloc((size_t)join_index + 2, sizeof(char *));
+    if (!normalized_argv) {
+        free(*out_joined_value);
+        *out_joined_value = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
+    for (int i = 0; i <= join_index; i++) {
+        normalized_argv[i] = argv[i];
+    }
+    normalized_argv[join_index + 1] = *out_joined_value;
+
+    *out_argc = join_index + 2;
+    *out_argv = normalized_argv;
+    return ESP_OK;
+}
+
 static int event_router_func(int argc, char **argv)
 {
     claw_event_router_result_t result = {0};
     char *output = NULL;
+    char *joined_value = NULL;
+    char **parse_argv = argv;
+    int parse_argc = argc;
     esp_err_t err;
-    int nerrors = arg_parse(argc, argv, (void **)&router_args);
+    int nerrors;
     int operation_count;
 
+    err = event_router_prepare_argv(argc, argv, &parse_argc, &parse_argv, &joined_value);
+    if (err != ESP_OK) {
+        printf("Out of memory\n");
+        return 1;
+    }
+
+    nerrors = arg_parse(parse_argc, parse_argv, (void **)&router_args);
+
     if (nerrors != 0) {
-        arg_print_errors(stderr, router_args.end, argv[0]);
+        arg_print_errors(stderr, router_args.end, parse_argv[0]);
+        free(parse_argv == argv ? NULL : parse_argv);
+        free(joined_value);
         return 1;
     }
 
@@ -54,6 +183,8 @@ static int event_router_func(int argc, char **argv)
                       router_args.emit_trigger->count;
     if (operation_count != 1) {
         printf("Exactly one operation must be specified\n");
+        free(parse_argv == argv ? NULL : parse_argv);
+        free(joined_value);
         return 1;
     }
 
@@ -61,9 +192,13 @@ static int event_router_func(int argc, char **argv)
         err = claw_event_router_reload();
         if (err != ESP_OK) {
             printf("event_router reload failed: %s\n", esp_err_to_name(err));
+            free(parse_argv == argv ? NULL : parse_argv);
+            free(joined_value);
             return 1;
         }
         printf("automation rules reloaded\n");
+        free(parse_argv == argv ? NULL : parse_argv);
+        free(joined_value);
         return 0;
     }
 
@@ -71,6 +206,8 @@ static int event_router_func(int argc, char **argv)
         output = calloc(1, router_args.rule->count ? 2048 : 4096);
         if (!output) {
             printf("Out of memory\n");
+            free(parse_argv == argv ? NULL : parse_argv);
+            free(joined_value);
             return 1;
         }
 
@@ -82,11 +219,15 @@ static int event_router_func(int argc, char **argv)
         if (err != ESP_OK) {
             printf("event_router rules failed: %s\n", esp_err_to_name(err));
             free(output);
+            free(parse_argv == argv ? NULL : parse_argv);
+            free(joined_value);
             return 1;
         }
 
         printf("%s\n", output);
         free(output);
+        free(parse_argv == argv ? NULL : parse_argv);
+        free(joined_value);
         return 0;
     }
 
@@ -94,9 +235,13 @@ static int event_router_func(int argc, char **argv)
         err = claw_event_router_add_rule_json(router_args.add_rule_json->sval[0]);
         if (err != ESP_OK) {
             printf("event_router add-rule failed: %s\n", esp_err_to_name(err));
+            free(parse_argv == argv ? NULL : parse_argv);
+            free(joined_value);
             return 1;
         }
         printf("automation rule added\n");
+        free(parse_argv == argv ? NULL : parse_argv);
+        free(joined_value);
         return 0;
     }
 
@@ -104,9 +249,13 @@ static int event_router_func(int argc, char **argv)
         err = claw_event_router_update_rule_json(router_args.update_rule_json->sval[0]);
         if (err != ESP_OK) {
             printf("event_router update-rule failed: %s\n", esp_err_to_name(err));
+            free(parse_argv == argv ? NULL : parse_argv);
+            free(joined_value);
             return 1;
         }
         printf("automation rule updated\n");
+        free(parse_argv == argv ? NULL : parse_argv);
+        free(joined_value);
         return 0;
     }
 
@@ -114,9 +263,13 @@ static int event_router_func(int argc, char **argv)
         err = claw_event_router_delete_rule(router_args.delete_rule->sval[0]);
         if (err != ESP_OK) {
             printf("event_router delete-rule failed: %s\n", esp_err_to_name(err));
+            free(parse_argv == argv ? NULL : parse_argv);
+            free(joined_value);
             return 1;
         }
         printf("automation rule deleted\n");
+        free(parse_argv == argv ? NULL : parse_argv);
+        free(joined_value);
         return 0;
     }
 
@@ -124,6 +277,8 @@ static int event_router_func(int argc, char **argv)
         err = claw_event_router_get_last_result(&result);
         if (err != ESP_OK) {
             printf("event_router last failed: %s\n", esp_err_to_name(err));
+            free(parse_argv == argv ? NULL : parse_argv);
+            free(joined_value);
             return 1;
         }
 
@@ -137,6 +292,8 @@ static int event_router_func(int argc, char **argv)
         printf("first_rule_id=%s\n", result.first_rule_id[0] ? result.first_rule_id : "-");
         printf("ack=%s\n", result.ack[0] ? result.ack : "-");
         printf("last_error=%s\n", esp_err_to_name(result.last_error));
+        free(parse_argv == argv ? NULL : parse_argv);
+        free(joined_value);
         return 0;
     }
 
@@ -144,6 +301,8 @@ static int event_router_func(int argc, char **argv)
         if (!router_args.source_cap->count || !router_args.channel->count ||
                 !router_args.chat_id->count || !router_args.text->count) {
             printf("'--emit-message' requires '--source-cap', '--channel', '--chat-id', and '--text'\n");
+            free(parse_argv == argv ? NULL : parse_argv);
+            free(joined_value);
             return 1;
         }
 
@@ -155,6 +314,8 @@ static int event_router_func(int argc, char **argv)
                                                 "cli-msg");
         if (err != ESP_OK) {
             printf("event_router emit-message failed: %s\n", esp_err_to_name(err));
+            free(parse_argv == argv ? NULL : parse_argv);
+            free(joined_value);
             return 1;
         }
 
@@ -162,24 +323,33 @@ static int event_router_func(int argc, char **argv)
                router_args.source_cap->sval[0],
                router_args.channel->sval[0],
                router_args.chat_id->sval[0]);
+        free(parse_argv == argv ? NULL : parse_argv);
+        free(joined_value);
         return 0;
     }
 
     if (!router_args.source_cap->count || !router_args.event_type->count ||
             !router_args.event_key->count || !router_args.payload_json->count) {
         printf("'--emit-trigger' requires '--source-cap', '--event-type', '--event-key', and '--payload-json'\n");
+        free(parse_argv == argv ? NULL : parse_argv);
+        free(joined_value);
         return 1;
     }
 
     {
-        cJSON *json = cJSON_Parse(router_args.payload_json->sval[0]);
+        char *payload_json = event_router_dup_unwrapped_json(router_args.payload_json->sval[0]);
+        cJSON *json = payload_json ? cJSON_Parse(payload_json) : NULL;
 
         if (!json || !cJSON_IsObject(json)) {
             cJSON_Delete(json);
+            free(payload_json);
             printf("'--payload-json' must be a JSON object\n");
+            free(parse_argv == argv ? NULL : parse_argv);
+            free(joined_value);
             return 1;
         }
         cJSON_Delete(json);
+        free(payload_json);
     }
 
     err = claw_event_router_publish_trigger(router_args.source_cap->sval[0],
@@ -188,6 +358,8 @@ static int event_router_func(int argc, char **argv)
                                             router_args.payload_json->sval[0]);
     if (err != ESP_OK) {
         printf("event_router emit-trigger failed: %s\n", esp_err_to_name(err));
+        free(parse_argv == argv ? NULL : parse_argv);
+        free(joined_value);
         return 1;
     }
 
@@ -195,6 +367,8 @@ static int event_router_func(int argc, char **argv)
            router_args.source_cap->sval[0],
            router_args.event_type->sval[0],
            router_args.event_key->sval[0]);
+    free(parse_argv == argv ? NULL : parse_argv);
+    free(joined_value);
     return 0;
 }
 

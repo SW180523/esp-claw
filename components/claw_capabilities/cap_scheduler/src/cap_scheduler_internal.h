@@ -60,6 +60,9 @@ esp_err_t cap_scheduler_load_items(const char *path,
                                    size_t max_items,
                                    size_t *out_count,
                                    const char *default_timezone);
+esp_err_t cap_scheduler_parse_item_json_string(const char *json,
+                                               cap_scheduler_item_t *item,
+                                               const char *default_timezone);
 esp_err_t cap_scheduler_save_items(const char *path,
                                    const cap_scheduler_entry_t *entries,
                                    size_t entry_count);

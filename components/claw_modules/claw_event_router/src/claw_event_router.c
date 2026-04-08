@@ -7,11 +7,14 @@
 
 #include <errno.h>
 #include <inttypes.h>
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/types.h>
 
 #include "cJSON.h"
 #include "claw_core.h"
@@ -79,6 +82,100 @@ static esp_err_t claw_event_router_write_rules_json_file(const char *path, const
 static esp_err_t claw_event_router_commit_rules(cJSON *root,
                                                 claw_event_router_rule_t *new_rules,
                                                 size_t new_rule_count);
+
+static const char *claw_event_router_skip_space(const char *value)
+{
+    while (value && *value && isspace((unsigned char)*value)) {
+        value++;
+    }
+    return value;
+}
+
+static char *claw_event_router_dup_unwrapped_json(const char *json)
+{
+    const char *start = NULL;
+    const char *end = NULL;
+    size_t len;
+    char *copy = NULL;
+
+    if (!json) {
+        return NULL;
+    }
+
+    start = claw_event_router_skip_space(json);
+    end = start + strlen(start);
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+
+    if ((end - start) >= 2 &&
+        ((start[0] == '\'' && end[-1] == '\'') || (start[0] == '"' && end[-1] == '"'))) {
+        start++;
+        end--;
+    }
+
+    len = (size_t)(end - start);
+    copy = calloc(1, len + 1);
+    if (!copy) {
+        return NULL;
+    }
+    memcpy(copy, start, len);
+    return copy;
+}
+
+static esp_err_t claw_event_router_ensure_parent_dir(const char *path)
+{
+    char dir[224];
+    char *cursor = NULL;
+    char *slash = NULL;
+    char *create_from = NULL;
+    struct stat st = {0};
+
+    if (!path || !path[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    strlcpy(dir, path, sizeof(dir));
+    slash = strrchr(dir, '/');
+    if (!slash) {
+        return ESP_OK;
+    }
+    *slash = '\0';
+
+    for (cursor = dir + 1; *cursor; cursor++) {
+        if (*cursor != '/') {
+            continue;
+        }
+        *cursor = '\0';
+        if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode)) {
+            create_from = cursor + 1;
+        }
+        *cursor = '/';
+    }
+
+    if (!create_from) {
+        ESP_LOGE(TAG, "No existing parent dir found for %s", path);
+        return ESP_FAIL;
+    }
+
+    for (cursor = create_from; *cursor; cursor++) {
+        if (*cursor != '/') {
+            continue;
+        }
+        *cursor = '\0';
+        if (mkdir(dir, 0755) != 0 && errno != EEXIST) {
+            ESP_LOGE(TAG, "mkdir failed for %s errno=%d", dir, errno);
+            return ESP_FAIL;
+        }
+        *cursor = '/';
+    }
+
+    if (mkdir(dir, 0755) != 0 && errno != EEXIST) {
+        ESP_LOGE(TAG, "mkdir failed for %s errno=%d", dir, errno);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
 
 static const char *claw_event_router_action_kind_to_string(claw_event_router_action_kind_t kind)
 {
@@ -522,6 +619,7 @@ static esp_err_t claw_event_router_parse_rule(const cJSON *item,
 static esp_err_t claw_event_router_parse_rule_json(const char *rule_json,
                                                    claw_event_router_rule_t *out_rule)
 {
+    char *normalized_json = NULL;
     cJSON *item = NULL;
     esp_err_t err;
 
@@ -529,7 +627,13 @@ static esp_err_t claw_event_router_parse_rule_json(const char *rule_json,
         return ESP_ERR_INVALID_ARG;
     }
 
-    item = cJSON_Parse(rule_json);
+    normalized_json = claw_event_router_dup_unwrapped_json(rule_json);
+    if (!normalized_json) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    item = cJSON_Parse(normalized_json);
+    free(normalized_json);
     if (!cJSON_IsObject(item)) {
         cJSON_Delete(item);
         return ESP_ERR_INVALID_ARG;
@@ -764,10 +868,14 @@ static esp_err_t claw_event_router_write_rules_json_file(const char *path, const
     if (!path || !path[0] || !json) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (claw_event_router_ensure_parent_dir(path) != ESP_OK) {
+        return ESP_FAIL;
+    }
 
     snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
     file = fopen(temp_path, "wb");
     if (!file) {
+        ESP_LOGE(TAG, "Failed to open temp rules file %s errno=%d", temp_path, errno);
         return errno == ENOENT ? ESP_ERR_NOT_FOUND : ESP_FAIL;
     }
 
@@ -775,12 +883,19 @@ static esp_err_t claw_event_router_write_rules_json_file(const char *path, const
     if ((json_len > 0 && fwrite(json, 1, json_len, file) != json_len) || fflush(file) != 0) {
         fclose(file);
         remove(temp_path);
+        ESP_LOGE(TAG, "Failed to write temp rules file %s errno=%d", temp_path, errno);
         return ESP_FAIL;
     }
     fclose(file);
 
+    if (remove(path) != 0 && errno != ENOENT) {
+        remove(temp_path);
+        ESP_LOGE(TAG, "Failed to remove old rules file %s errno=%d", path, errno);
+        return ESP_FAIL;
+    }
     if (rename(temp_path, path) != 0) {
         remove(temp_path);
+        ESP_LOGE(TAG, "Failed to rename %s to %s errno=%d", temp_path, path, errno);
         return ESP_FAIL;
     }
     return ESP_OK;
