@@ -23,6 +23,8 @@ typedef struct {
 
 esp_err_t claw_skill_init(const claw_skill_config_t *config);
 
+esp_err_t claw_skill_reload_registry(void);
+
 /* Renders the skill catalog used by the prompt layer. */
 esp_err_t claw_skill_read_skills_list(char *buf, size_t size);
 

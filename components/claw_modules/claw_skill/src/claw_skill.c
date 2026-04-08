@@ -113,6 +113,20 @@ static void free_registry_entry(claw_skill_registry_entry_t *entry)
     memset(entry, 0, sizeof(*entry));
 }
 
+static void free_registry_entries(claw_skill_registry_entry_t *entries, size_t count)
+{
+    size_t i;
+
+    if (!entries) {
+        return;
+    }
+
+    for (i = 0; i < count; i++) {
+        free_registry_entry(&entries[i]);
+    }
+    free(entries);
+}
+
 static void claw_skill_reset(void)
 {
     size_t i;
@@ -495,14 +509,7 @@ static esp_err_t load_registry_from_json(void)
     entries = NULL;
 
 cleanup:
-    if (entries) {
-        size_t i;
-
-        for (i = 0; i < entry_count; i++) {
-            free_registry_entry(&entries[i]);
-        }
-        free(entries);
-    }
+    free_registry_entries(entries, entry_count);
     cJSON_Delete(root);
     return err;
 }
@@ -756,6 +763,33 @@ esp_err_t claw_skill_init(const claw_skill_config_t *config)
     s_skill.initialized = 1;
     ESP_LOGI(TAG, "Initialized registry with %u skill(s)", (unsigned)s_skill.entry_count);
     return ESP_OK;
+}
+
+esp_err_t claw_skill_reload_registry(void)
+{
+    claw_skill_registry_entry_t *old_entries = NULL;
+    size_t old_count = 0;
+    esp_err_t err;
+
+    if (!s_skill.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    old_entries = s_skill.entries;
+    old_count = s_skill.entry_count;
+    s_skill.entries = NULL;
+    s_skill.entry_count = 0;
+
+    err = load_registry_from_json();
+    if (err == ESP_OK) {
+        free_registry_entries(old_entries, old_count);
+        ESP_LOGI(TAG, "Reloaded registry with %u skill(s)", (unsigned)s_skill.entry_count);
+        return ESP_OK;
+    }
+
+    s_skill.entries = old_entries;
+    s_skill.entry_count = old_count;
+    return err;
 }
 
 esp_err_t claw_skill_read_skills_list(char *buf, size_t size)
