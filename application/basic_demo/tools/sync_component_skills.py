@@ -43,9 +43,9 @@ def load_json_file(path: Path) -> object:
     try:
         return json.loads(path.read_text(encoding='utf-8'))
     except FileNotFoundError:
-        fail(f"Missing JSON file: {path}")
+        fail(f'Missing JSON file: {path}')
     except json.JSONDecodeError as exc:
-        fail(f"Invalid JSON in {path}: {exc}")
+        fail(f'Invalid JSON in {path}: {exc}')
 
 
 def load_manifest(path: Path) -> dict:
@@ -54,7 +54,7 @@ def load_manifest(path: Path) -> dict:
 
     data = load_json_file(path)
     if not isinstance(data, dict):
-        fail(f"Manifest must be a JSON object: {path}")
+        fail(f'Manifest must be a JSON object: {path}')
     return {
         'component_entries': list(data.get('component_entries', [])),
         'component_files': list(data.get('component_files', [])),
@@ -109,9 +109,12 @@ def recover_demo_entries(
 
 
 def load_demo_entries(skills_list_path: Path, manifest: dict, component_entries: list[dict]) -> list[dict]:
+    if not skills_list_path.exists():
+        return []
+
     data = load_json_file(skills_list_path)
     if not isinstance(data, dict):
-        fail(f"{skills_list_path} must be a JSON object.")
+        fail(f'{skills_list_path} must be a JSON object.')
 
     skills = data.get('skills')
     if not isinstance(skills, list):
@@ -140,7 +143,7 @@ def collect_component_skills(
 
         data = load_json_file(json_path)
         if not isinstance(data, dict):
-            fail(f"{json_path} must be a JSON object.")
+            fail(f'{json_path} must be a JSON object.')
 
         skills = data.get('skills')
         if not isinstance(skills, list):
@@ -161,17 +164,17 @@ def collect_component_skills(
             if skill_path.parent != skills_dir.resolve():
                 fail(
                     f"Component '{component_name}' declares skill file outside its skills directory: "
-                    f"{skill_file} ({json_path})"
+                    f'{skill_file} ({json_path})'
                 )
             if not skill_path.is_file():
                 fail(
                     f"Component '{component_name}' references missing skill file '{skill_file}' "
-                    f"in {json_path}"
+                    f'in {json_path}'
                 )
             if skill_path.suffix.lower() != '.md':
                 fail(
                     f"Component '{component_name}' declares non-markdown skill file '{skill_file}' "
-                    f"in {json_path}"
+                    f'in {json_path}'
                 )
 
             previous_id = skill_id_sources.get(skill_id)
@@ -233,7 +236,7 @@ def merge_entries(
 
     for entry in demo_entries:
         skill_file = entry.get('file')
-        register(entry, f"demo skills list ({demo_skills_dir / skill_file})")
+        register(entry, f'demo skills list ({demo_skills_dir / skill_file})')
 
     for entry in component_entries:
         entry_key = (str(entry.get('id')), str(entry.get('file')))
@@ -249,7 +252,7 @@ def validate_demo_markdown_files(demo_entries: list[dict], demo_skills_dir: Path
         if not skill_path.is_file():
             fail(
                 f"Demo skills_list.json references missing skill file '{skill_file}' "
-                f"at {skill_path}"
+                f'at {skill_path}'
             )
 
 
@@ -261,6 +264,8 @@ def sync_markdown_files(
     merged_entries: list[dict],
     component_entries: list[dict],
 ) -> None:
+    demo_skills_dir.mkdir(parents=True, exist_ok=True)
+
     for old_file in manifest.get('component_files', []):
         if old_file not in copy_map:
             stale_path = demo_skills_dir / old_file
@@ -290,8 +295,6 @@ def sync_markdown_files(
 def main() -> int:
     args = parse_args()
     demo_skills_dir = Path(args.demo_skills_dir).resolve()
-    if not demo_skills_dir.is_dir():
-        fail(f"Demo skills directory does not exist: {demo_skills_dir}")
 
     skills_list_path = demo_skills_dir / SKILLS_LIST_FILE
     manifest_path = Path(args.manifest_path).resolve()
@@ -324,5 +327,5 @@ if __name__ == '__main__':
     try:
         sys.exit(main())
     except SkillSyncError as exc:
-        print(f"sync_component_skills.py: error: {exc}", file=sys.stderr)
+        print(f'sync_component_skills.py: error: {exc}', file=sys.stderr)
         sys.exit(1)
