@@ -6,8 +6,10 @@
 #include "basic_demo_settings.h"
 
 #include <string.h>
+#include "esp_log.h"
 #include "nvs.h"
 
+static const char *TAG = "basic_demo_settings";
 static const char *BASIC_DEMO_SETTINGS_NAMESPACE = "basic_demo";
 
 typedef struct {
@@ -104,7 +106,7 @@ esp_err_t basic_demo_settings_load(basic_demo_settings_t *settings)
         { "wifi_ssid", settings->wifi_ssid, settings->wifi_ssid, sizeof(settings->wifi_ssid) },
         { "wifi_password", settings->wifi_password, settings->wifi_password, sizeof(settings->wifi_password) },
         { "llm_api_key", settings->llm_api_key, settings->llm_api_key, sizeof(settings->llm_api_key) },
-        { "llm_backend_type", settings->llm_backend_type, settings->llm_backend_type, sizeof(settings->llm_backend_type) },
+        { "llm_backend", settings->llm_backend_type, settings->llm_backend_type, sizeof(settings->llm_backend_type) },
         { "llm_profile", settings->llm_profile, settings->llm_profile, sizeof(settings->llm_profile) },
         { "llm_model", settings->llm_model, settings->llm_model, sizeof(settings->llm_model) },
         { "llm_base_url", settings->llm_base_url, settings->llm_base_url, sizeof(settings->llm_base_url) },
@@ -113,14 +115,14 @@ esp_err_t basic_demo_settings_load(basic_demo_settings_t *settings)
         { "qq_app_id", settings->qq_app_id, settings->qq_app_id, sizeof(settings->qq_app_id) },
         { "qq_app_secret", settings->qq_app_secret, settings->qq_app_secret, sizeof(settings->qq_app_secret) },
         { "feishu_app_id", settings->feishu_app_id, settings->feishu_app_id, sizeof(settings->feishu_app_id) },
-        { "feishu_app_secret", settings->feishu_app_secret, settings->feishu_app_secret, sizeof(settings->feishu_app_secret) },
+        { "feishu_secret", settings->feishu_app_secret, settings->feishu_app_secret, sizeof(settings->feishu_app_secret) },
         { "tg_bot_token", settings->tg_bot_token, settings->tg_bot_token, sizeof(settings->tg_bot_token) },
         { "wechat_token", settings->wechat_token, settings->wechat_token, sizeof(settings->wechat_token) },
         { "wechat_base_url", settings->wechat_base_url, settings->wechat_base_url, sizeof(settings->wechat_base_url) },
-        { "wechat_cdn_base_url", settings->wechat_cdn_base_url, settings->wechat_cdn_base_url, sizeof(settings->wechat_cdn_base_url) },
-        { "wechat_account_id", settings->wechat_account_id, settings->wechat_account_id, sizeof(settings->wechat_account_id) },
-        { "search_brave_key", settings->search_brave_key, settings->search_brave_key, sizeof(settings->search_brave_key) },
-        { "search_tavily_key", settings->search_tavily_key, settings->search_tavily_key, sizeof(settings->search_tavily_key) },
+        { "wechat_cdn_url", settings->wechat_cdn_base_url, settings->wechat_cdn_base_url, sizeof(settings->wechat_cdn_base_url) },
+        { "wechat_acct_id", settings->wechat_account_id, settings->wechat_account_id, sizeof(settings->wechat_account_id) },
+        { "brave_key", settings->search_brave_key, settings->search_brave_key, sizeof(settings->search_brave_key) },
+        { "tavily_key", settings->search_tavily_key, settings->search_tavily_key, sizeof(settings->search_tavily_key) },
         { "time_timezone", settings->time_timezone, settings->time_timezone, sizeof(settings->time_timezone) },
     };
 
@@ -158,6 +160,7 @@ esp_err_t basic_demo_settings_save(const basic_demo_settings_t *settings)
     nvs_handle_t handle;
     esp_err_t err = settings_open(NVS_READWRITE, &handle);
     if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_open failed: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -165,7 +168,7 @@ esp_err_t basic_demo_settings_save(const basic_demo_settings_t *settings)
         { "wifi_ssid", NULL, (char *)settings->wifi_ssid, sizeof(settings->wifi_ssid) },
         { "wifi_password", NULL, (char *)settings->wifi_password, sizeof(settings->wifi_password) },
         { "llm_api_key", NULL, (char *)settings->llm_api_key, sizeof(settings->llm_api_key) },
-        { "llm_backend_type", NULL, (char *)settings->llm_backend_type, sizeof(settings->llm_backend_type) },
+        { "llm_backend", NULL, (char *)settings->llm_backend_type, sizeof(settings->llm_backend_type) },
         { "llm_profile", NULL, (char *)settings->llm_profile, sizeof(settings->llm_profile) },
         { "llm_model", NULL, (char *)settings->llm_model, sizeof(settings->llm_model) },
         { "llm_base_url", NULL, (char *)settings->llm_base_url, sizeof(settings->llm_base_url) },
@@ -174,26 +177,30 @@ esp_err_t basic_demo_settings_save(const basic_demo_settings_t *settings)
         { "qq_app_id", NULL, (char *)settings->qq_app_id, sizeof(settings->qq_app_id) },
         { "qq_app_secret", NULL, (char *)settings->qq_app_secret, sizeof(settings->qq_app_secret) },
         { "feishu_app_id", NULL, (char *)settings->feishu_app_id, sizeof(settings->feishu_app_id) },
-        { "feishu_app_secret", NULL, (char *)settings->feishu_app_secret, sizeof(settings->feishu_app_secret) },
+        { "feishu_secret", NULL, (char *)settings->feishu_app_secret, sizeof(settings->feishu_app_secret) },
         { "tg_bot_token", NULL, (char *)settings->tg_bot_token, sizeof(settings->tg_bot_token) },
         { "wechat_token", NULL, (char *)settings->wechat_token, sizeof(settings->wechat_token) },
         { "wechat_base_url", NULL, (char *)settings->wechat_base_url, sizeof(settings->wechat_base_url) },
-        { "wechat_cdn_base_url", NULL, (char *)settings->wechat_cdn_base_url, sizeof(settings->wechat_cdn_base_url) },
-        { "wechat_account_id", NULL, (char *)settings->wechat_account_id, sizeof(settings->wechat_account_id) },
-        { "search_brave_key", NULL, (char *)settings->search_brave_key, sizeof(settings->search_brave_key) },
-        { "search_tavily_key", NULL, (char *)settings->search_tavily_key, sizeof(settings->search_tavily_key) },
+        { "wechat_cdn_url", NULL, (char *)settings->wechat_cdn_base_url, sizeof(settings->wechat_cdn_base_url) },
+        { "wechat_acct_id", NULL, (char *)settings->wechat_account_id, sizeof(settings->wechat_account_id) },
+        { "brave_key", NULL, (char *)settings->search_brave_key, sizeof(settings->search_brave_key) },
+        { "tavily_key", NULL, (char *)settings->search_tavily_key, sizeof(settings->search_tavily_key) },
         { "time_timezone", NULL, (char *)settings->time_timezone, sizeof(settings->time_timezone) },
     };
 
     for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i) {
         err = nvs_set_str(handle, fields[i].key, fields[i].buffer);
         if (err != ESP_OK) {
+            ESP_LOGE(TAG, "nvs_set_str(%s) failed: %s", fields[i].key, esp_err_to_name(err));
             nvs_close(handle);
             return err;
         }
     }
 
     err = nvs_commit(handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_commit failed: %s", esp_err_to_name(err));
+    }
     nvs_close(handle);
     return err;
 }

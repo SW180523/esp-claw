@@ -171,7 +171,18 @@ async function saveConfig() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(readConfigForm()),
     });
-    const result = await response.json();
+    const responseText = await response.text();
+    let result = {};
+    if (responseText) {
+      try {
+        result = JSON.parse(responseText);
+      } catch (parseError) {
+        if (response.ok) {
+          throw parseError;
+        }
+        result = { error: responseText };
+      }
+    }
     if (!response.ok) {
       throw new Error(result.error || "Failed to save settings");
     }
