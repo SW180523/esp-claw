@@ -18,7 +18,7 @@
 static const char *TAG = "basic_demo";
 static basic_demo_settings_t s_settings = {0};
 
-#define BASIC_DEMO_FATFS_BASE_PATH       "/fatfs/data"
+const char *basic_demo_fatfs_base_path = "/fatfs/data";
 #define BASIC_DEMO_FATFS_PARTITION_LABEL "storage"
 #define BASIC_DEMO_ENABLE_MEM_LOG        (0)
 
@@ -47,7 +47,7 @@ static esp_err_t init_fatfs(void)
     uint64_t free_bytes = 0;
     esp_err_t err;
 
-    err = esp_vfs_fat_spiflash_mount_rw_wl(BASIC_DEMO_FATFS_BASE_PATH,
+    err = esp_vfs_fat_spiflash_mount_rw_wl(basic_demo_fatfs_base_path,
                                            BASIC_DEMO_FATFS_PARTITION_LABEL,
                                            &mount_config,
                                            &s_wl_handle);
@@ -56,7 +56,7 @@ static esp_err_t init_fatfs(void)
         return err;
     }
 
-    err = esp_vfs_fat_info(BASIC_DEMO_FATFS_BASE_PATH, &total, &free_bytes);
+    err = esp_vfs_fat_info(basic_demo_fatfs_base_path, &total, &free_bytes);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to query FATFS info: %s", esp_err_to_name(err));
     } else {
@@ -115,7 +115,7 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_board_manager_init());
     ESP_ERROR_CHECK(init_fatfs());
     ESP_ERROR_CHECK(basic_demo_wifi_init());
-    ESP_ERROR_CHECK(config_http_server_init(BASIC_DEMO_FATFS_BASE_PATH));
+    ESP_ERROR_CHECK(config_http_server_init(basic_demo_fatfs_base_path));
 
     if (basic_demo_wifi_start(s_settings.wifi_ssid, s_settings.wifi_password) == ESP_OK) {
         ESP_ERROR_CHECK(config_http_server_start());

@@ -1,7 +1,8 @@
 local audio = require("audio")
 local bm = require("board_manager")
+local storage = require("storage")
 
-local TEST_WAV_PATH = "/fatfs/data/test.wav"
+local TEST_WAV_PATH = storage.join_path(storage.get_root_dir(), "test.wav")
 
 local output_codec, output_rate, output_channels, output_bits =
     bm.get_audio_codec_output_params("audio_dac")
@@ -9,6 +10,9 @@ if not output_codec then
     print("[audio_play_test_wav] ERROR: get_audio_codec_output_params(audio_dac) failed: " .. tostring(output_rate))
     return
 end
+
+print(string.format("[audio_play_test_wav] output_codec=%s, output_rate=%d, output_channels=%d, output_bits=%d",
+      output_codec, output_rate, output_channels, output_bits))
 
 local output, out_err = audio.new_output(output_codec, output_rate, output_channels, output_bits)
 if not output then

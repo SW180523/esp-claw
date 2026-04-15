@@ -1,7 +1,8 @@
 local board_manager = require("board_manager")
 local camera = require("camera")
+local storage = require("storage")
 
-local SAVE_PATH = "/fatfs/data/capture_demo.jpg"
+local SAVE_PATH = storage.join_path(storage.get_root_dir(), "capture_demo.jpg")
 local CAPTURE_TIMEOUT_MS = 3000
 
 local function close_camera()

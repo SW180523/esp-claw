@@ -1,8 +1,9 @@
 local audio = require("audio")
 local bm = require("board_manager")
 local delay = require("delay")
+local storage = require("storage")
 
-local REC_PATH = "/fatfs/data/rec.wav"
+local REC_PATH = storage.join_path(storage.get_root_dir(), "rec.wav")
 local input_codec, input_rate, input_channels, input_bits, input_gain =
     bm.get_audio_codec_input_params("audio_adc")
 if not input_codec then

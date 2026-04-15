@@ -1,7 +1,8 @@
 local delay = require("delay")
 local esp_heap = require("esp_heap")
+local storage = require("storage")
 
-local LUA_ROOT = "/fatfs/data/lua"
+local LUA_ROOT = storage.join_path(storage.get_root_dir(), "lua")
 local caps = esp_heap.caps
 
 local iterations = (args and args.iterations) or 20
@@ -83,7 +84,7 @@ local function print_task_watermarks(tag)
 end
 
 local function run_demo(name)
-    local path = LUA_ROOT .. "/" .. name
+    local path = storage.join_path(LUA_ROOT, name)
     local original_print = print
     local saw_error_output = false
     local result_ok = false

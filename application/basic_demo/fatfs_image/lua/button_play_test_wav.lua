@@ -2,9 +2,10 @@ local audio = require("audio")
 local bm = require("board_manager")
 local btn = require("button")
 local delay = require("delay")
+local storage = require("storage")
 
 local BUTTON_GPIO_NUM = 28
-local TEST_WAV_PATH = "/fatfs/data/test.wav"
+local TEST_WAV_PATH = storage.join_path(storage.get_root_dir(), "test.wav")
 local POLL_INTERVAL_MS = 10
 local RUN_TIME_MS = 60000
 
