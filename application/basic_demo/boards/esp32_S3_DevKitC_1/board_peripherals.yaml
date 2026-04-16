@@ -1,13 +1,7 @@
 version: 1.0.0
 # Peripherals Configuration
-peripherals:
-  - name: gpio_button
-    type: gpio
-    config:
-      pin: 0
-      mode: GPIO_MODE_INPUT
-      default_level: 1
 
+peripherals:
   - name: rmt_tx
     type: rmt
     role: tx
