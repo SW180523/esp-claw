@@ -14,7 +14,7 @@
 #include "claw_core_llm.h"
 
 static const char *CAP_LLM_INSPECT_SYSTEM_PROMPT =
-    "You analyze local image files for the ESP32 clawgent. "
+    "You analyze local image files for the ESP32 claw. "
     "Describe visible content plainly and briefly. "
     "If the image is unclear, say what is uncertain instead of guessing.";
 

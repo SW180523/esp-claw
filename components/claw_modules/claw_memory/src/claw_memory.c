@@ -21,7 +21,7 @@
 static const char *TAG = "claw_memory";
 static const char *DEFAULT_LONG_TERM_MEMORY =
     "# Long-term Memory\n\n"
-    "(empty - Clawgent will write memories here as it learns)\n";
+    "(empty - ESP-Claw will write memories here as it learns)\n";
 
 #define CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES 20
 #define CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS    1024

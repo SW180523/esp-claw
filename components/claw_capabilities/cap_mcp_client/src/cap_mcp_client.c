@@ -21,8 +21,8 @@ static esp_err_t cap_mcp_client_group_init(void)
         return err;
     }
 
-    mdns_hostname_set("clawgent");
-    mdns_instance_name_set("Clawgent");
+    mdns_hostname_set("esp-claw");
+    mdns_instance_name_set("esp-claw");
     return ESP_OK;
 }
 

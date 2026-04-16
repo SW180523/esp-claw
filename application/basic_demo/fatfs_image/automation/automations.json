@@ -28,15 +28,15 @@
     ]
   },
   {
-    "id": "im_hello_clawgent",
-    "description": "Intercept IM hello! clawgent and reply directly.Just for demonstration",
+    "id": "im_hello_claw",
+    "description": "Intercept IM hello! esp-claw and reply directly.Just for demonstration",
     "enabled": true,
     "ack": "{{event.source_channel}} hello intercepted",
     "match": {
       "event_type": "message",
       "event_key": "text",
       "content_type": "text",
-      "text": "hello! clawgent"
+      "text": "hello! esp-claw"
     },
     "actions": [
       {

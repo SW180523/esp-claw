@@ -589,7 +589,7 @@ static esp_err_t cap_im_wechat_add_base_info(cJSON *root)
         return ESP_ERR_NO_MEM;
     }
 
-    if (!cJSON_AddStringToObject(base_info, "channel_version", "esp-clawgent-wechat")) {
+    if (!cJSON_AddStringToObject(base_info, "channel_version", "esp-claw-wechat")) {
         return ESP_ERR_NO_MEM;
     }
 

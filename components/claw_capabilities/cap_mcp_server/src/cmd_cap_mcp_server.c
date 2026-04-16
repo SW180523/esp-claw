@@ -132,7 +132,7 @@ void register_cap_mcp_server(void)
         .help = "MCP server operations.\n"
         "Examples:\n"
         " mcp_server --status\n"
-        " mcp_server --set-config --hostname clawgent --endpoint mcp_server\n"
+        " mcp_server --set-config --hostname "CAP_MCP_SERVER_DEFAULT_HOSTNAME" --endpoint mcp_server\n"
         " mcp_server --disable\n"
         " mcp_server --enable\n",
         .func = mcp_server_func,

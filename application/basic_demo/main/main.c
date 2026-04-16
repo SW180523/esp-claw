@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "app_clawgent.h"
+#include "app_claw.h"
 #include "basic_demo_settings.h"
 #include "basic_demo_wifi.h"
 #include "config_http_server.h"
@@ -128,7 +128,7 @@ void app_main(void)
         ESP_LOGW(TAG, "Continuing without Wi-Fi");
     }
 
-    ESP_ERROR_CHECK(app_clawgent_start(&s_settings));
+    ESP_ERROR_CHECK(app_claw_start(&s_settings));
 
 #if BASIC_DEMO_ENABLE_MEM_LOG
     /* Start memory monitor: print internal free, min free, PSRAM free every 20s */

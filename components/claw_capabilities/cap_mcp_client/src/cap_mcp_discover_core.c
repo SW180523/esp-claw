@@ -170,8 +170,8 @@ static esp_err_t cap_mcp_append_self_device_if_needed(cJSON *devices, size_t *fo
         return err;
     }
 
-    hostname = (config.hostname && config.hostname[0]) ? config.hostname : "clawgent";
-    instance = (config.instance_name && config.instance_name[0]) ? config.instance_name : "Clawgent";
+    hostname = (config.hostname && config.hostname[0]) ? config.hostname : CAP_MCP_SERVER_DEFAULT_HOSTNAME;
+    instance = (config.instance_name && config.instance_name[0]) ? config.instance_name : CAP_MCP_SERVER_DEFAULT_INSTANCE;
     endpoint = (config.endpoint && config.endpoint[0]) ? config.endpoint : CAP_MCP_DEFAULT_ENDPOINT;
     ip = cap_mcp_get_self_ip_string(ip_buf, sizeof(ip_buf));
 
@@ -276,7 +276,7 @@ esp_err_t cap_mcp_discover_services(const char *input_json, cJSON **result_out)
         const char *instance;
         esp_err_t append_err;
 
-        if (!include_self && result->hostname && strcmp(result->hostname, "clawgent") == 0) {
+        if (!include_self && result->hostname && strcmp(result->hostname, CAP_MCP_SERVER_DEFAULT_HOSTNAME) == 0) {
             continue;
         }
 

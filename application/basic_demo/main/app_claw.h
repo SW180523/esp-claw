@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-esp_err_t app_clawgent_start(const basic_demo_settings_t *settings);
+esp_err_t app_claw_start(const basic_demo_settings_t *settings);
 
 #ifdef __cplusplus
 }

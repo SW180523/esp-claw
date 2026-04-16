@@ -1,3 +1,3 @@
 # Long-term Memory
 
-(empty - Clawgent will write memories here as it learns)
+(empty - ESP-Claw will write memories here as it learns)

@@ -14,6 +14,9 @@
 extern "C" {
 #endif
 
+#define CAP_MCP_SERVER_DEFAULT_HOSTNAME      "clawgent"
+#define CAP_MCP_SERVER_DEFAULT_INSTANCE      "Clawgent"
+
 typedef struct {
     const char *hostname;
     const char *instance_name;

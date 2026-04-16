@@ -9,7 +9,7 @@ After the device boots, the overall flow is:
 1. Initialize NVS and load device settings
 2. Mount FATFS at `/fatfs/data`
 3. Initialize Wi-Fi and the local HTTP configuration service
-4. Enter `app_clawgent_start()`
+4. Enter `app_claw_start()`
 5. Initialize the event router, memory, skills, and capabilities
 6. Initialize and start `claw_core`
 7. Start the CLI and begin handling requests and events

@@ -45,7 +45,7 @@ The following table shows how ESP-Claw differs from traditional IoT devices:
 
 ## Event Router: Respond to Events, Drive Actions
 
-Unlike OpenClaw, which primarily reacts to user messages, embedded devices must handle many kinds of external events. Responding to those events and making decisions based on them is one of the core capabilities of ESP-Clawgent.
+Unlike OpenClaw, which primarily reacts to user messages, embedded devices must handle many kinds of external events. Responding to those events and making decisions based on them is one of the core capabilities of ESP-Claw.
 
 In this design, the passive executor concept of a **tool** is strengthened and extended into a **capability**, which works seamlessly with the LLM. A **capability** can both emit events and execute actions. For example:
 
@@ -64,7 +64,7 @@ This makes tasks like the following possible:
 
 ## Lua Runtime: Self-Evolving Behavior
 
-ESP-Clawgent embeds a Lua interpreter. The agent can edit, debug, and run Lua scripts on the device, breaking away from the limits of fixed C-only behavior and making self-evolution possible on ESP32 for the first time. With just a natural-language request, ESP-Clawgent can generate animations or games, optimize control algorithms and parameters, and keep iterating over time.
+ESP-Claw embeds a Lua interpreter. The agent can edit, debug, and run Lua scripts on the device, breaking away from the limits of fixed C-only behavior and making self-evolution possible on ESP32 for the first time. With just a natural-language request, ESP-Claw can generate animations or games, optimize control algorithms and parameters, and keep iterating over time.
 
 The repository also provides rich built-in C peripheral bindings and graphics libraries for Lua, allowing users to combine them freely for higher efficiency and more creative applications.
 
@@ -87,7 +87,7 @@ Traditional AI agents usually keep memory only inside the conversation window, w
 
 ## Rich Peripheral Access: Built for Information Processing
 
-ESP32 is naturally suited for collecting, analyzing, transmitting, and acting on information. ESP-Clawgent supports cameras, microphones, and many other sensors. Most drivers can be obtained through the ESP-IDF Component Registry, making integration straightforward once the corresponding component is selected. As a result, the device can hear sound and observe the world around it. ESP-Clawgent also provides a TTS component, allowing it to remind you at the right moment or even play the music you want to hear.
+ESP32 is naturally suited for collecting, analyzing, transmitting, and acting on information. ESP-Claw supports cameras, microphones, and many other sensors. Most drivers can be obtained through the ESP-IDF Component Registry, making integration straightforward once the corresponding component is selected. As a result, the device can hear sound and observe the world around it. ESP-Claw also provides a TTS component, allowing it to remind you at the right moment or even play the music you want to hear.
 
 ## MCP as a Unified Protocol: Make Devices AI-Native Objects
 
@@ -112,7 +112,7 @@ Automation systems, the Lua runtime, and other capabilities continue to work eve
 
 ## Focused on Specific Workloads
 
-ESP-Clawgent includes the full OpenClaw workflow. Compared with Claw systems running on a PC, it can stay **more focused** on the tasks you assign in many real-world scenarios. Combined with the memory system, it can keep evolving along with your habits. You can connect it to your most frequently used messaging app and experience how it continuously learns from your usage. **Privacy is not a concern** because all memories stay on the device.
+ESP-Claw includes the full OpenClaw workflow. Compared with Claw systems running on a PC, it can stay **more focused** on the tasks you assign in many real-world scenarios. Combined with the memory system, it can keep evolving along with your habits. You can connect it to your most frequently used messaging app and experience how it continuously learns from your usage. **Privacy is not a concern** because all memories stay on the device.
 
 You can ask it to do things like:
 
@@ -134,12 +134,12 @@ The current codebase can be understood as four layers:
 The main directory structure of the current repository is as follows:
 
 ```text
-esp-clawgent/
+esp-claw/
 ├── application/
 │   └── basic_demo/
 │       ├── main/
-│       │   ├── main.c                     # Firmware entry
-│       │   ├── app_clawgent.c            # App bootstrap and assembly
+│       │   ├── main.c                    # Firmware entry
+│       │   ├── app_claw.c                # App bootstrap and assembly
 │       │   ├── basic_demo_wifi.*         # Wi-Fi connection and network setup
 │       │   ├── basic_demo_settings.*     # Local settings persistence
 │       │   ├── config_http_server.*      # Web configuration service

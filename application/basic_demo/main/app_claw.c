@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "app_clawgent.h"
+#include "app_claw.h"
 
 #include <stdbool.h>
 #include <stdlib.h>
@@ -295,7 +295,7 @@ static bool basic_demo_llm_is_configured(const basic_demo_settings_t *settings)
            settings->llm_profile[0];
 }
 
-esp_err_t app_clawgent_start(const basic_demo_settings_t *settings)
+esp_err_t app_claw_start(const basic_demo_settings_t *settings)
 {
     claw_core_config_t core_config = {0};
     claw_event_router_config_t router_config = {

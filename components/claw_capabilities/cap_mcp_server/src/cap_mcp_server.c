@@ -25,8 +25,6 @@
 
 static const char *TAG = "cap_mcp_srv";
 
-#define CAP_MCP_SERVER_DEFAULT_HOSTNAME      "clawgent"
-#define CAP_MCP_SERVER_DEFAULT_INSTANCE      "Clawgent"
 #define CAP_MCP_SERVER_DEFAULT_ENDPOINT      "mcp_server"
 #define CAP_MCP_SERVER_DEFAULT_SERVICE_TYPE  "_mcp"
 #define CAP_MCP_SERVER_DEFAULT_SERVICE_PROTO "_tcp"
@@ -266,7 +264,7 @@ static esp_err_t cap_mcp_server_register_tools(void)
         },
         {
             .name = "router.emit_event",
-            .description = "Emit a standard router event into clawgent. Provide event_type and optional text, target_channel, target_endpoint, payload_json.",
+            .description = "Emit a standard router event into esp-claw. Provide event_type and optional text, target_channel, target_endpoint, payload_json.",
             .callback = cap_mcp_server_emit_event_callback,
             .property_names = {"event_type", "text", "target_channel", "target_endpoint", "payload_json"},
             .property_count = 5,

@@ -14,7 +14,7 @@
 #include "esp_timer.h"
 #include "lauxlib.h"
 
-static const char *LUA_LCD_TOUCH_STATE_KEY = "clawgent.lcd_touch_state";
+static const char *LUA_LCD_TOUCH_STATE_KEY = "esp-claw.lcd_touch_state";
 
 static esp_lcd_touch_handle_t lua_lcd_touch_check_handle(lua_State *L, int index)
 {
