@@ -1,9 +1,8 @@
 [
   {
     "id": "demo_interval_1m",
-    "enabled": true,
+    "enabled": false,
     "kind": "interval",
-    "timezone": "CST-8",
     "interval_ms": 60000,
     "event_type": "schedule",
     "event_key": "demo_interval_1m",
@@ -18,7 +17,6 @@
     "id": "demo_cron_hourly",
     "enabled": false,
     "kind": "cron",
-    "timezone": "CST-8",
     "cron_expr": "0 * * * *",
     "event_type": "schedule",
     "event_key": "demo_cron_hourly",
@@ -33,7 +31,6 @@
     "id": "demo_once_bootstrap",
     "enabled": false,
     "kind": "once",
-    "timezone": "CST-8",
     "start_at_ms": 1893456000000,
     "event_type": "schedule",
     "event_key": "demo_once_bootstrap",

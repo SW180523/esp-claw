@@ -200,7 +200,8 @@ void cap_scheduler_apply_defaults(cap_scheduler_item_t *item, const char *defaul
     if (!item->payload_json[0]) {
         strlcpy(item->payload_json, "{}", sizeof(item->payload_json));
     }
-    if (!item->timezone[0] && default_timezone && default_timezone[0]) {
+    item->timezone[0] = '\0';
+    if (default_timezone && default_timezone[0]) {
         strlcpy(item->timezone, default_timezone, sizeof(item->timezone));
     }
     if (!item->timezone[0]) {

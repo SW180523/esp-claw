@@ -18,23 +18,22 @@ Use this skill when the user needs to inspect or change event router automation 
 ## Calling rules
 - Use direct router manager capabilities. Do not route through `run_cli_command` unless explicitly requested.
 - `add_router_rule` and `update_router_rule` input must be:
-- `{"rule_json":"<JSON string of one rule object>"}`.
-- `rule_json` is a string, not an object.
+  - `{"rule_json":"<JSON string of one rule object>"}`.
+  - `rule_json` is a string, not an object.
 - Inside `rule_json`, one rule object must include:
-- `id` (string, required)
-- `match` (object, required)
-- `actions` (non-empty array, required)
-- `match.event_type` (string, required)
+  - `id` (string, required)
+  - `match` (object, required)
+  - `actions` (non-empty array, required)
+  - `match.event_type` (string, required)
 - Common optional fields:
-- rule-level: `description`, `enabled`, `consume_on_match`, `ack`, `vars`
-- match-level: `event_key`, `source_cap`, `source_channel` (or `channel`), `chat_id`, `content_type`, `text`
-- Action `type` must be one of:
-- `call_cap`, `run_agent`, `run_script`, `send_message`, `emit_event`, `drop`
-- Action requirements:
-- `call_cap`: requires `cap` + `input` object
-- `run_agent`: `input` object recommended (empty object allowed)
-- `run_script`/`send_message`/`emit_event`: require `input` object
-- `drop`: no special input needed
+  - rule-level: `description`, `enabled`, `consume_on_match`, `ack`, `vars`
+  - match-level: `event_key`, `source_cap`, `source_channel` (or `channel`), `chat_id`, `content_type`, `text`
+- Action `type` must be one of: `call_cap`, `run_agent`, `run_script`, `send_message`, `emit_event`, `drop`
+  - Action requirements:
+    `call_cap`: requires `cap` + `input` object
+    `run_agent`: `input` object recommended (empty object allowed)
+    `run_script`/`send_message`/`emit_event`: require `input` object
+    `drop`: no special input needed
 
 ## Common failure causes
 - Put `event_type` at rule top-level instead of `match.event_type`.
@@ -51,15 +50,25 @@ Use this skill when the user needs to inspect or change event router automation 
 
 ## Examples
 
+### Action `type`: `send_message`
 Add one router rule for schedule published event: when `event_key=drink_reminder`, send QQ message.
 
 ```json
 {
-  "rule_json": "{\"id\":\"drink_reminder_qq\",\"description\":\"Send drink reminder to QQ\",\"enabled\":true,\"consume_on_match\":true,\"match\":{\"event_type\":\"schedule\",\"event_key\":\"drink_reminder\"},\"actions\":[{\"type\":\"send_message\",\"input\":{\"channel\":\"qq\",\"chat_id\":\"a_certain_QQ_chat_ID\",\"message\":\"It's time to drink water!\"}}]}"
+  "rule_json": "{\"id\":\"drink_reminder_to_qq\",\"description\":\"Send drink reminder to QQ\",\"enabled\":true,\"consume_on_match\":true,\"match\":{\"event_type\":\"schedule\",\"event_key\":\"drink_reminder\"},\"actions\":[{\"type\":\"send_message\",\"input\":{\"channel\":\"qq\",\"chat_id\":\"a_certain_QQ_chat_ID\",\"message\":\"It's time to drink water!\"}}]}"
 }
 ```
 
-Get one rule:
+### Action `type`: `run_agent`
+Add one router rule for schedule published event: when `event_key=daily_agent_check`, wake the agent and let it reason and then respond via QQ.
+
+```json
+{
+  "rule_json": "{\"id\":\"daily_agent_check_agent\",\"description\":\"Wake agent for daily scheduled check\",\"enabled\":true,\"consume_on_match\":true,\"match\":{\"event_type\":\"schedule\",\"event_key\":\"daily_agent_check\"},\"actions\":[{\"type\":\"run_agent\",\"input\":{\"target_channel\":\"qq\",\"target_chat_id\":\"a_certain_QQ_chat_ID\",\"session_policy\":\"chat\"}}]}"
+}
+```
+
+### Get one rule
 
 ```json
 {
@@ -67,7 +76,7 @@ Get one rule:
 }
 ```
 
-Delete one rule:
+### Delete one rule
 
 ```json
 {

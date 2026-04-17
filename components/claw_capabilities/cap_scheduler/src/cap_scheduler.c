@@ -580,6 +580,16 @@ static esp_err_t cap_scheduler_load_from_disk_locked(void)
     s_cap_scheduler.item_count = item_count;
     free(items);
 
+    err = cap_scheduler_persist_definitions_locked();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to save normalized scheduler definitions to %s: %s",
+                 s_cap_scheduler.schedules_path,
+                 esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "Saved normalized scheduler definitions to %s",
+                 s_cap_scheduler.schedules_path);
+    }
+
     err = cap_scheduler_load_runtime_state_locked(&runtime_state_loaded);
     if (err != ESP_OK) {
         return err;
@@ -841,6 +851,7 @@ esp_err_t cap_scheduler_reload(void)
 
 esp_err_t cap_scheduler_add(const cap_scheduler_item_t *item)
 {
+    cap_scheduler_item_t normalized_item;
     ssize_t index;
     esp_err_t err;
     int64_t now_ms = cap_scheduler_now_ms();
@@ -848,12 +859,15 @@ esp_err_t cap_scheduler_add(const cap_scheduler_item_t *item)
     if (!s_cap_scheduler.initialized || !item) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (cap_scheduler_validate_item(item) != ESP_OK) {
+
+    normalized_item = *item;
+    cap_scheduler_apply_defaults(&normalized_item, s_cap_scheduler.default_timezone);
+    if (cap_scheduler_validate_item(&normalized_item) != ESP_OK) {
         return ESP_ERR_INVALID_ARG;
     }
 
     cap_scheduler_lock();
-    if (cap_scheduler_find_entry_index_locked(item->id) >= 0) {
+    if (cap_scheduler_find_entry_index_locked(normalized_item.id) >= 0) {
         cap_scheduler_unlock();
         return ESP_ERR_INVALID_STATE;
     }
@@ -864,9 +878,8 @@ esp_err_t cap_scheduler_add(const cap_scheduler_item_t *item)
     }
     memset(&s_cap_scheduler.entries[index], 0, sizeof(s_cap_scheduler.entries[index]));
     s_cap_scheduler.entries[index].occupied = true;
-    s_cap_scheduler.entries[index].item = *item;
-    cap_scheduler_apply_defaults(&s_cap_scheduler.entries[index].item, s_cap_scheduler.default_timezone);
-    s_cap_scheduler.entries[index].status = item->enabled ?
+    s_cap_scheduler.entries[index].item = normalized_item;
+    s_cap_scheduler.entries[index].status = normalized_item.enabled ?
                                             CAP_SCHEDULER_STATUS_SCHEDULED : CAP_SCHEDULER_STATUS_DISABLED;
     cap_scheduler_refresh_entry_locked(&s_cap_scheduler.entries[index], now_ms);
     s_cap_scheduler.item_count = cap_scheduler_active_count_locked();
@@ -884,6 +897,7 @@ esp_err_t cap_scheduler_add(const cap_scheduler_item_t *item)
 esp_err_t cap_scheduler_update(const cap_scheduler_item_t *item)
 {
     cap_scheduler_entry_t previous_entry;
+    cap_scheduler_item_t normalized_item;
     ssize_t index;
     esp_err_t err;
     int64_t now_ms = cap_scheduler_now_ms();
@@ -891,19 +905,21 @@ esp_err_t cap_scheduler_update(const cap_scheduler_item_t *item)
     if (!s_cap_scheduler.initialized || !item) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (cap_scheduler_validate_item(item) != ESP_OK) {
+
+    normalized_item = *item;
+    cap_scheduler_apply_defaults(&normalized_item, s_cap_scheduler.default_timezone);
+    if (cap_scheduler_validate_item(&normalized_item) != ESP_OK) {
         return ESP_ERR_INVALID_ARG;
     }
 
     cap_scheduler_lock();
-    index = cap_scheduler_find_entry_index_locked(item->id);
+    index = cap_scheduler_find_entry_index_locked(normalized_item.id);
     if (index < 0) {
         cap_scheduler_unlock();
         return ESP_ERR_NOT_FOUND;
     }
     previous_entry = s_cap_scheduler.entries[index];
-    s_cap_scheduler.entries[index].item = *item;
-    cap_scheduler_apply_defaults(&s_cap_scheduler.entries[index].item, s_cap_scheduler.default_timezone);
+    s_cap_scheduler.entries[index].item = normalized_item;
     if (s_cap_scheduler.entries[index].status != CAP_SCHEDULER_STATUS_PAUSED) {
         cap_scheduler_refresh_entry_locked(&s_cap_scheduler.entries[index], now_ms);
     }
