@@ -18,8 +18,8 @@
 
 static const char *TAG = "claw_cap";
 
-#define CLAW_CAP_DEFAULT_MAX_CAPABILITIES 16
-#define CLAW_CAP_DEFAULT_MAX_GROUPS       8
+#define CLAW_CAP_DEFAULT_MAX_CAPABILITIES 4
+#define CLAW_CAP_DEFAULT_MAX_GROUPS       4
 #define CLAW_CAP_UNLOAD_POLL_MS          20
 
 typedef struct {
@@ -75,6 +75,10 @@ static void claw_cap_free_session_visibility(claw_cap_session_visibility_t *visi
 static ssize_t claw_cap_find_session_visibility_locked(const char *session_id);
 static const claw_cap_session_visibility_t *claw_cap_get_session_visibility_locked(
     const char *session_id);
+static size_t claw_cap_count_used_descriptor_slots_locked(void);
+static size_t claw_cap_count_used_group_slots_locked(void);
+static esp_err_t claw_cap_ensure_descriptor_capacity_locked(size_t additional_free_slots);
+static esp_err_t claw_cap_ensure_group_capacity_locked(size_t additional_free_slots);
 
 static char *claw_cap_strdup(const char *src)
 {
@@ -637,6 +641,149 @@ static size_t claw_cap_count_free_descriptor_slots_locked(void)
     return count;
 }
 
+static size_t claw_cap_count_used_descriptor_slots_locked(void)
+{
+    size_t i;
+    size_t count = 0;
+
+    for (i = 0; i < s_runtime.descriptor_capacity; i++) {
+        if (s_runtime.descriptor_slots[i].occupied) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
+static size_t claw_cap_count_used_group_slots_locked(void)
+{
+    size_t i;
+    size_t count = 0;
+
+    for (i = 0; i < s_runtime.group_capacity; i++) {
+        if (s_runtime.group_slots[i].occupied) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
+static esp_err_t claw_cap_ensure_descriptor_capacity_locked(size_t additional_free_slots)
+{
+    claw_cap_descriptor_slot_t *original_slots = s_runtime.descriptor_slots;
+    claw_cap_descriptor_t *original_snapshot = s_runtime.descriptor_list_snapshot;
+    claw_cap_descriptor_slot_t *new_slots = NULL;
+    claw_cap_descriptor_t *new_snapshot = NULL;
+    size_t required_capacity;
+    size_t old_capacity;
+    size_t new_capacity;
+
+    if (additional_free_slots == 0 || claw_cap_count_free_descriptor_slots_locked() >= additional_free_slots) {
+        return ESP_OK;
+    }
+
+    old_capacity = s_runtime.descriptor_capacity;
+    required_capacity = claw_cap_count_used_descriptor_slots_locked() + additional_free_slots;
+    new_capacity = s_runtime.descriptor_capacity ? s_runtime.descriptor_capacity : CLAW_CAP_DEFAULT_MAX_CAPABILITIES;
+    // Descriptors grow with a small buffer instead of geometric jumps.
+    if (new_capacity < required_capacity) {
+        size_t growth_margin = required_capacity / 4;
+
+        if (growth_margin < CLAW_CAP_DEFAULT_MAX_CAPABILITIES) {
+            growth_margin = CLAW_CAP_DEFAULT_MAX_CAPABILITIES;
+        }
+        new_capacity = required_capacity + growth_margin;
+    }
+
+    new_slots = realloc(original_slots, new_capacity * sizeof(*new_slots));
+    if (!new_slots) {
+        return ESP_ERR_NO_MEM;
+    }
+    new_snapshot = realloc(original_snapshot, new_capacity * sizeof(*new_snapshot));
+    if (!new_snapshot) {
+        if (new_slots != original_slots) {
+            void *restored = realloc(new_slots, old_capacity * sizeof(*new_slots));
+
+            if (restored) {
+                new_slots = restored;
+            }
+        }
+        return ESP_ERR_NO_MEM;
+    }
+
+    if (new_capacity > old_capacity) {
+        memset(&new_slots[old_capacity], 0, (new_capacity - old_capacity) * sizeof(*new_slots));
+        memset(&new_snapshot[old_capacity], 0, (new_capacity - old_capacity) * sizeof(*new_snapshot));
+    }
+    s_runtime.descriptor_slots = new_slots;
+    s_runtime.descriptor_list_snapshot = new_snapshot;
+    s_runtime.descriptor_capacity = new_capacity;
+    ESP_LOGI(TAG, "Expanded descriptor capacity to %u", (unsigned)new_capacity);
+    return ESP_OK;
+}
+
+static esp_err_t claw_cap_ensure_group_capacity_locked(size_t additional_free_slots)
+{
+    claw_cap_group_slot_t *original_slots = s_runtime.group_slots;
+    claw_cap_group_info_t *original_snapshot = s_runtime.group_list_snapshot;
+    claw_cap_group_slot_t *new_slots = NULL;
+    claw_cap_group_info_t *new_snapshot = NULL;
+    size_t required_capacity;
+    size_t old_capacity;
+    size_t new_capacity;
+
+    if (additional_free_slots == 0) {
+        return ESP_OK;
+    }
+    if (s_runtime.group_capacity > 0) {
+        size_t free_slots = s_runtime.group_capacity - claw_cap_count_used_group_slots_locked();
+
+        if (free_slots >= additional_free_slots) {
+            return ESP_OK;
+        }
+    }
+
+    old_capacity = s_runtime.group_capacity;
+    required_capacity = claw_cap_count_used_group_slots_locked() + additional_free_slots;
+    new_capacity = s_runtime.group_capacity ? s_runtime.group_capacity : CLAW_CAP_DEFAULT_MAX_GROUPS;
+    // Groups stay relatively few, so reserve only a small buffer above the exact need.
+    if (new_capacity < required_capacity) {
+        size_t growth_margin = required_capacity / 4;
+
+        if (growth_margin < CLAW_CAP_DEFAULT_MAX_GROUPS) {
+            growth_margin = CLAW_CAP_DEFAULT_MAX_GROUPS;
+        }
+        new_capacity = required_capacity + growth_margin;
+    }
+
+    new_slots = realloc(original_slots, new_capacity * sizeof(*new_slots));
+    if (!new_slots) {
+        return ESP_ERR_NO_MEM;
+    }
+    new_snapshot = realloc(original_snapshot, new_capacity * sizeof(*new_snapshot));
+    if (!new_snapshot) {
+        if (new_slots != original_slots) {
+            void *restored = realloc(new_slots, old_capacity * sizeof(*new_slots));
+
+            if (restored) {
+                new_slots = restored;
+            }
+        }
+        return ESP_ERR_NO_MEM;
+    }
+
+    if (new_capacity > old_capacity) {
+        memset(&new_slots[old_capacity], 0, (new_capacity - old_capacity) * sizeof(*new_slots));
+        memset(&new_snapshot[old_capacity], 0, (new_capacity - old_capacity) * sizeof(*new_snapshot));
+    }
+    s_runtime.group_slots = new_slots;
+    s_runtime.group_list_snapshot = new_snapshot;
+    s_runtime.group_capacity = new_capacity;
+    ESP_LOGI(TAG, "Expanded group capacity to %u", (unsigned)new_capacity);
+    return ESP_OK;
+}
+
 static esp_err_t claw_cap_validate_group_locked(const claw_cap_group_t *group)
 {
     size_t i;
@@ -648,12 +795,6 @@ static esp_err_t claw_cap_validate_group_locked(const claw_cap_group_t *group)
     }
     if (claw_cap_find_group_slot_index_locked(group->group_id) >= 0) {
         return ESP_ERR_INVALID_STATE;
-    }
-    if (claw_cap_find_free_group_slot_locked() < 0) {
-        return ESP_ERR_NO_MEM;
-    }
-    if (claw_cap_count_free_descriptor_slots_locked() < group->descriptor_count) {
-        return ESP_ERR_NO_MEM;
     }
 
     for (i = 0; i < group->descriptor_count; i++) {
@@ -870,6 +1011,16 @@ static esp_err_t claw_cap_register_group_locked(const claw_cap_group_t *group,
     ssize_t group_slot_index;
     claw_cap_group_slot_t *group_slot;
     size_t i;
+    esp_err_t err;
+
+    err = claw_cap_ensure_group_capacity_locked(1);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = claw_cap_ensure_descriptor_capacity_locked(group->descriptor_count);
+    if (err != ESP_OK) {
+        return err;
+    }
 
     group_slot_index = claw_cap_find_free_group_slot_locked();
     if (group_slot_index < 0) {
@@ -921,43 +1072,14 @@ static esp_err_t claw_cap_register_group_locked(const claw_cap_group_t *group,
     return ESP_OK;
 }
 
-esp_err_t claw_cap_init(const claw_cap_config_t *config)
+esp_err_t claw_cap_init(void)
 {
-    size_t descriptor_capacity;
-    size_t group_capacity;
-
     if (s_runtime.initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    descriptor_capacity = config && config->max_capabilities ?
-                          config->max_capabilities : CLAW_CAP_DEFAULT_MAX_CAPABILITIES;
-    group_capacity = config && config->max_groups ?
-                     config->max_groups : CLAW_CAP_DEFAULT_MAX_GROUPS;
-
-    s_runtime.descriptor_slots = calloc(descriptor_capacity,
-                                        sizeof(claw_cap_descriptor_slot_t));
-    s_runtime.group_slots = calloc(group_capacity, sizeof(claw_cap_group_slot_t));
-    s_runtime.descriptor_list_snapshot = calloc(descriptor_capacity,
-                                                sizeof(claw_cap_descriptor_t));
-    s_runtime.group_list_snapshot = calloc(group_capacity,
-                                           sizeof(claw_cap_group_info_t));
-    if (!s_runtime.descriptor_slots || !s_runtime.group_slots ||
-            !s_runtime.descriptor_list_snapshot || !s_runtime.group_list_snapshot) {
-        free(s_runtime.descriptor_slots);
-        free(s_runtime.group_slots);
-        free(s_runtime.descriptor_list_snapshot);
-        free(s_runtime.group_list_snapshot);
-        memset(&s_runtime, 0, sizeof(s_runtime));
-        return ESP_ERR_NO_MEM;
-    }
-
     s_runtime.mutex = xSemaphoreCreateMutex();
     if (!s_runtime.mutex) {
-        free(s_runtime.descriptor_slots);
-        free(s_runtime.group_slots);
-        free(s_runtime.descriptor_list_snapshot);
-        free(s_runtime.group_list_snapshot);
         if (s_runtime.mutex) {
             vSemaphoreDelete(s_runtime.mutex);
         }
@@ -965,10 +1087,8 @@ esp_err_t claw_cap_init(const claw_cap_config_t *config)
         return ESP_ERR_NO_MEM;
     }
 
-    s_runtime.descriptor_capacity = descriptor_capacity;
-    s_runtime.group_capacity = group_capacity;
     s_runtime.initialized = true;
-    ESP_LOGI(TAG, "Initialized runtime");
+    ESP_LOGI(TAG, "Initialized runtime with dynamic capacity growth");
     return ESP_OK;
 }
 

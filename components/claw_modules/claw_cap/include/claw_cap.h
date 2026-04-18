@@ -116,12 +116,7 @@ typedef struct {
     uint32_t active_calls;
 } claw_cap_descriptor_info_t;
 
-typedef struct {
-    size_t max_capabilities;
-    size_t max_groups;
-} claw_cap_config_t;
-
-esp_err_t claw_cap_init(const claw_cap_config_t *config);
+esp_err_t claw_cap_init(void);
 esp_err_t claw_cap_register(const claw_cap_descriptor_t *descriptor);
 esp_err_t claw_cap_register_group(const claw_cap_group_t *group);
 esp_err_t claw_cap_start_all(void);

@@ -125,12 +125,7 @@ static esp_err_t init_console(void)
 
     ESP_RETURN_ON_ERROR(esp_console_init(&console_config), TAG, "Failed to init console");
     esp_console_register_help_command();
-    ESP_RETURN_ON_ERROR(claw_cap_init(&(claw_cap_config_t) {
-        .max_capabilities = 8,
-        .max_groups = 2,
-    }),
-    TAG,
-    "Failed to init claw_cap");
+    ESP_RETURN_ON_ERROR(claw_cap_init(), TAG, "Failed to init claw_cap");
     ESP_RETURN_ON_ERROR(cap_router_mgr_register_group(), TAG, "Failed to register router manager cap");
     ESP_RETURN_ON_ERROR(claw_cap_start_all(), TAG, "Failed to start capabilities");
     register_cap_router_mgr();
