@@ -117,9 +117,8 @@ static int lua_func(int argc, char **argv)
         return 1;
     }
 
-    operation_count = lua_args.show_base_dir->count + lua_args.list->count + lua_args.write->count +
-                      lua_args.run->count + lua_args.run_async->count + lua_args.jobs->count +
-                      lua_args.job->count;
+    operation_count = lua_args.show_base_dir->count + lua_args.list->count + lua_args.write->count + lua_args.run->count +
+                      lua_args.run_async->count + lua_args.jobs->count + lua_args.job->count;
     if (operation_count != 1) {
         printf("Exactly one operation must be specified\n");
         return 1;
@@ -147,20 +146,15 @@ static int lua_func(int argc, char **argv)
     }
 
     if (lua_args.list->count) {
-        err = cap_lua_list_scripts(lua_args.prefix->count ? lua_args.prefix->sval[0] : NULL,
-                                   result,
-                                   4096);
+        err = cap_lua_list_scripts(lua_args.prefix->count ? lua_args.prefix->sval[0] : NULL, result, 4096);
     } else if (lua_args.write->count) {
         if (!lua_args.path->count || !lua_args.content->count) {
             printf("'--write' requires '--path' and '--content'\n");
             free(result);
             return 1;
         }
-        err = cap_lua_write_script(lua_args.path->sval[0],
-                                   lua_args.content->sval[0],
-                                   lua_args.no_overwrite->count == 0,
-                                   result,
-                                   4096);
+        err = cap_lua_write_script(lua_args.path->sval[0], lua_args.content->sval[0], lua_args.no_overwrite->count == 0,
+                                   result, 4096);
     } else if (lua_args.run->count) {
         sync_run = true;
         if (!lua_args.path->count) {
@@ -168,26 +162,18 @@ static int lua_func(int argc, char **argv)
             free(result);
             return 1;
         }
-        err = cap_lua_run_script(lua_args.path->sval[0],
-                                 lua_args.args_json->count ? lua_args.args_json->sval[0] : NULL,
-                                 timeout_ms,
-                                 result,
-                                 4096);
+        err = cap_lua_run_script(lua_args.path->sval[0], lua_args.args_json->count ? lua_args.args_json->sval[0] : NULL,
+                                 timeout_ms, result, 4096);
     } else if (lua_args.run_async->count) {
         if (!lua_args.path->count) {
             printf("'--run-async' requires '--path'\n");
             free(result);
             return 1;
         }
-        err = cap_lua_run_script_async(lua_args.path->sval[0],
-                                       lua_args.args_json->count ? lua_args.args_json->sval[0] : NULL,
-                                       timeout_ms,
-                                       result,
-                                       4096);
+        err = cap_lua_run_script_async(lua_args.path->sval[0], lua_args.args_json->count ? lua_args.args_json->sval[0] : NULL,
+                                       timeout_ms, result, 4096);
     } else if (lua_args.jobs->count) {
-        err = cap_lua_list_jobs(lua_args.status->count ? lua_args.status->sval[0] : NULL,
-                                result,
-                                4096);
+        err = cap_lua_list_jobs(lua_args.status->count ? lua_args.status->sval[0] : NULL, result, 4096);
     } else {
         err = cap_lua_get_job(lua_args.job->sval[0], result, 4096);
     }
@@ -221,9 +207,9 @@ void register_cap_lua(void)
     lua_args.run_async = arg_lit0(NULL, "run-async", "Run a managed Lua script asynchronously");
     lua_args.jobs = arg_lit0(NULL, "jobs", "List async Lua jobs");
     lua_args.job = arg_str0(NULL, "job", "<job_id>", "Show one async Lua job");
-    lua_args.path = arg_str0("p", "path", "<path>", "Lua file path relative to base dir or absolute");
+    lua_args.path = arg_str0("p", "path", "<path>", "Lua file path relative to the configured base dir");
     lua_args.content = arg_str0("c", "content", "<content>", "Lua script content for write");
-    lua_args.prefix = arg_str0(NULL, "prefix", "<prefix>", "Optional absolute prefix filter for list");
+    lua_args.prefix = arg_str0(NULL, "prefix", "<prefix>", "Optional relative prefix filter for list");
     lua_args.args_json = arg_str0(NULL, "args-json", "<json>", "JSON object/array passed to the script");
     lua_args.status = arg_str0(NULL, "status", "<status>", "Job status filter: all|queued|running|done|failed|timeout");
     lua_args.timeout_ms = arg_int0("t", "timeout-ms", "<ms>", "Execution timeout in milliseconds");

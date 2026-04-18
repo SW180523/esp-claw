@@ -13,7 +13,6 @@
 #include "cap_lua.h"
 #include "esp_err.h"
 
-#define CAP_LUA_DEFAULT_BASE_DIR       "/spiffs/lua"
 #define CAP_LUA_MAX_SCRIPT_SIZE        (16 * 1024)
 #define CAP_LUA_OUTPUT_SIZE            (4 * 1024)
 #define CAP_LUA_MAX_EXEC_MS            60000

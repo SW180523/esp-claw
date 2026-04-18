@@ -27,9 +27,7 @@ typedef struct {
     int64_t deadline_us;
 } cap_lua_exec_ctx_t;
 
-static void cap_lua_output_append(cap_lua_exec_ctx_t *ctx,
-                                  const char *text,
-                                  size_t len)
+static void cap_lua_output_append(cap_lua_exec_ctx_t *ctx, const char *text, size_t len)
 {
     size_t room;
     size_t copy;
@@ -96,8 +94,7 @@ static void cap_lua_push_json_value(lua_State *L, const cJSON *item)
 
 static int cap_lua_print_capture(lua_State *L)
 {
-    cap_lua_exec_ctx_t *ctx = (cap_lua_exec_ctx_t *)lua_touserdata(
-                                  L, lua_upvalueindex(1));
+    cap_lua_exec_ctx_t *ctx = (cap_lua_exec_ctx_t *)lua_touserdata(L, lua_upvalueindex(1));
     int top = lua_gettop(L);
     int i;
 
@@ -187,17 +184,12 @@ static void cap_lua_run_runtime_cleanups(void)
 
 esp_err_t cap_lua_runtime_init(void)
 {
-    ESP_LOGI(TAG,
-             "Lua runtime ready: scripts=%s registered_modules=%u",
-             cap_lua_get_base_dir(),
+    ESP_LOGI(TAG, "Lua runtime ready: scripts=%s registered_modules=%u", cap_lua_get_base_dir(),
              (unsigned int)cap_lua_get_module_count());
     return ESP_OK;
 }
 
-esp_err_t cap_lua_runtime_execute_file(const char *path,
-                                       const char *args_json,
-                                       uint32_t timeout_ms,
-                                       char *output,
+esp_err_t cap_lua_runtime_execute_file(const char *path, const char *args_json, uint32_t timeout_ms, char *output,
                                        size_t output_size)
 {
     struct stat st = {0};
@@ -216,10 +208,7 @@ esp_err_t cap_lua_runtime_execute_file(const char *path,
     output[0] = '\0';
 
     if (!cap_lua_path_is_valid(path)) {
-        snprintf(output,
-                 output_size,
-                 "Error: Lua path must be under %s and end with .lua",
-                 cap_lua_get_base_dir());
+        snprintf(output, output_size, "Error: Lua path must be under %s and end with .lua", cap_lua_get_base_dir());
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -255,9 +244,7 @@ esp_err_t cap_lua_runtime_execute_file(const char *path,
         if (ctx.len > 0) {
             cap_lua_output_append(&ctx, "ERROR: ", 7);
         }
-        cap_lua_output_append(&ctx,
-                              msg ? msg : "unknown Lua error",
-                              strlen(msg ? msg : "unknown Lua error"));
+        cap_lua_output_append(&ctx, msg ? msg : "unknown Lua error", strlen(msg ? msg : "unknown Lua error"));
         cap_lua_output_append(&ctx, "\n", 1);
         lua_close(L);
         return ESP_FAIL;

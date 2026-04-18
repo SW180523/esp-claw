@@ -2,68 +2,28 @@
 
 Use this skill when the user wants to see existing Lua scripts, run one, or inspect async execution jobs.
 
-## Command Rule
-- The LLM should call Lua through the direct capability execute entrypoints, not through `cap_cli`.
-- Use `lua_list_scripts` to inspect scripts.
-- Use `lua_run_script` for synchronous execution.
-- Use `lua_run_script_async` for long-running or continuous scripts.
-- Use `lua_list_async_jobs` and `lua_get_async_job` to inspect async jobs.
+## Rules
+- Call the direct capability entrypoints, not `cap_cli`.
+- Use `lua_list_scripts` to inspect files. `prefix` is optional and must also be a relative path under the Lua base directory.
+- Use `lua_run_script` for short tasks that should return output immediately.
+- Use `lua_run_script_async` for loops, animations, watchers, or other long-running behavior.
+- Use `lua_list_async_jobs` and `lua_get_async_job` to inspect async execution state.
+- `path` must be a relative `.lua` path under the configured Lua base directory.
+- Newly authored scripts that are still being validated must run from `temp/*.lua`.
+- `args` may be an object or array. The runtime exposes it to Lua as the global `args`.
+- `timeout_ms` is optional, but when present it must be a positive integer.
 
-## Running a Script Synchronously
-Use `lua_run_script` when the user wants immediate output.
-- Required: `path`
-- Optional: `args`, `timeout_ms`
-- Prefer relative paths such as `hello.lua`
-
-Examples:
+## Minimal Examples
 ```json
-{
-  "path": "hello.lua"
-}
+{"path":"hello.lua"}
 ```
 
 ```json
-{
-  "path": "blink.lua",
-  "args": {
-    "pin": 2
-  },
-  "timeout_ms": 3000
-}
+{"path":"blink.lua","args":{"pin":2},"timeout_ms":3000}
 ```
 
-If the script expects structured inputs, pass them through `args`. The runtime exposes them to Lua as the global `args`.
-
-## Running a Script Asynchronously
-Use `lua_run_script_async` for long-running or continuous scripts.
-- Required: `path`
-- Optional: `args`, `timeout_ms`
-
-Examples:
-```json
-{
-  "path": "blink.lua"
-}
-```
-
-```json
-{
-  "path": "blink.lua",
-  "args": {
-    "pin": 2
-  },
-  "timeout_ms": 3000
-}
-```
-
-After starting an async script:
-- Use `lua_list_async_jobs`
-- Use `lua_list_async_jobs` with `{"status":"running"}`
-- Use `lua_get_async_job` with `{"job_id":"<job_id>"}`
-
-## Execution Notes
-- Paths must resolve under `/spiffs/lua` and end with `.lua`.
-- `--timeout-ms` must be a positive integer when provided.
-- Prefer synchronous run for short scripts that should finish and return text.
-- Prefer async run for loops, animations, watchers, or long-running device behaviors.
-- If the user asks to run a script that does not exist yet, switch to the Lua authoring flow first.
+## Guidance
+- If the target script does not exist yet, switch to the Lua authoring flow first.
+- Prefer re-running the same relative path while iterating on a script instead of creating many near-duplicate files.
+- After running a temporary script, keep using the same `temp/*.lua` path for revisions until the user confirms it should be kept.
+- When saving the confirmed version, move or rewrite it under `user/` rather than keeping it in `temp/`.

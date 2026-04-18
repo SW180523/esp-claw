@@ -30,21 +30,9 @@ esp_err_t cap_lua_register_module(const char *name, lua_CFunction open_fn);
 esp_err_t cap_lua_register_modules(const cap_lua_module_t *modules, size_t count);
 esp_err_t cap_lua_register_runtime_cleanup(cap_lua_runtime_cleanup_fn_t cleanup_fn);
 esp_err_t cap_lua_list_scripts(const char *prefix, char *output, size_t output_size);
-esp_err_t cap_lua_write_script(const char *path,
-                               const char *content,
-                               bool overwrite,
-                               char *output,
-                               size_t output_size);
-esp_err_t cap_lua_run_script(const char *path,
-                             const char *args_json,
-                             uint32_t timeout_ms,
-                             char *output,
-                             size_t output_size);
-esp_err_t cap_lua_run_script_async(const char *path,
-                                   const char *args_json,
-                                   uint32_t timeout_ms,
-                                   char *output,
-                                   size_t output_size);
+esp_err_t cap_lua_write_script(const char *path, const char *content, bool overwrite, char *output, size_t output_size);
+esp_err_t cap_lua_run_script(const char *path, const char *args_json, uint32_t timeout_ms, char *output, size_t output_size);
+esp_err_t cap_lua_run_script_async(const char *path, const char *args_json, uint32_t timeout_ms, char *output, size_t output_size);
 esp_err_t cap_lua_list_jobs(const char *status, char *output, size_t output_size);
 esp_err_t cap_lua_get_job(const char *job_id, char *output, size_t output_size);
 

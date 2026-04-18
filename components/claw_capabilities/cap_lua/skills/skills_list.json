@@ -1,9 +1,18 @@
 {
   "skills": [
     {
+      "id": "cap_lua_edit",
+      "file": "cap_lua_edit.md",
+      "title": "cap_lua_edit",
+      "summary": "Rules for writing Lua scripts with the registered module skills and relative script paths.",
+      "cap_groups": [
+        "cap_lua"
+      ]
+    },
+    {
       "id": "cap_lua_run",
       "file": "cap_lua_run.md",
-      "summary": "This Files describes how to correctly use Lua scripts.",
+      "summary": "Rules for listing, running, and inspecting managed Lua scripts and async jobs.",
       "cap_groups": [
         "cap_lua"
       ]
