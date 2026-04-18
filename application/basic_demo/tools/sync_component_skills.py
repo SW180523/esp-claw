@@ -32,6 +32,12 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help='Component mapping in the form <name>=<dir>.',
     )
+    parser.add_argument(
+        '--exclude-skill-id',
+        action='append',
+        default=[],
+        help='Skill id to exclude from the synced demo skill catalog.',
+    )
     return parser.parse_args()
 
 
@@ -124,7 +130,8 @@ def load_demo_entries(skills_list_path: Path, manifest: dict, component_entries:
 
 
 def collect_component_skills(
-    components: list[tuple[str, Path]]
+    components: list[tuple[str, Path]],
+    excluded_skill_ids: set[str],
 ) -> tuple[list[dict], dict[str, Path], dict[tuple[str, str], str]]:
     component_entries: list[dict] = []
     copy_map: dict[str, Path] = {}
@@ -159,6 +166,8 @@ def collect_component_skills(
                 fail(f"{json_path} contains a skill entry without a valid string 'id'.")
             if not isinstance(skill_file, str) or not skill_file:
                 fail(f"{json_path} contains a skill entry without a valid string 'file'.")
+            if skill_id in excluded_skill_ids:
+                continue
 
             skill_path = (skills_dir / skill_file).resolve()
             if skill_path.parent != skills_dir.resolve():
@@ -302,7 +311,11 @@ def main() -> int:
     manifest = load_manifest(manifest_path)
 
     components = parse_component_specs(args.component)
-    component_entries, copy_map, component_entry_sources = collect_component_skills(components)
+    excluded_skill_ids = {skill_id for skill_id in args.exclude_skill_id if skill_id}
+    component_entries, copy_map, component_entry_sources = collect_component_skills(
+        components,
+        excluded_skill_ids,
+    )
     demo_entries = load_demo_entries(skills_list_path, manifest, component_entries)
     validate_demo_markdown_files(demo_entries, demo_skills_dir)
     merged_entries = merge_entries(

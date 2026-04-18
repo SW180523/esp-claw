@@ -16,6 +16,7 @@ const strings = {
     pageSubtitle:
       "Configure credentials, runtime settings, and manage FATFS storage on your ESP device.",
     tabConfig: "Configuration",
+    tabMemory: "Memory",
     tabFiles: "File Manager",
 
     statusLoading: "Loading\u2026",
@@ -83,6 +84,22 @@ const strings = {
     saveBtn: "Save Changes",
     saveSuccess: "Settings saved",
     saveError: "Failed to save settings",
+    memoryTitle: "Memory Files",
+    memoryDescription: "Manage the device memory files under /memory.",
+    memoryCardLongTerm: "Long-term Memory / 长期记忆",
+    memoryMissing: "Long-term memory file does not exist yet.",
+    memoryCreate: "Create",
+    memorySave: "Save Memory",
+    memoryRefresh: "Refresh",
+    memoryAuxMissing: "This file does not exist yet.",
+    memoryCreateEmpty: "Create",
+    memoryCreateConfirm: "Memory does not exist. Create /memory/memory.md now?",
+    memoryCreated: "Memory created",
+    memoryEmptyCreated: "Empty file created",
+    memorySaved: "Memory saved",
+    memoryRefreshed: "Memory reloaded",
+    memoryLoadError: "Failed to load memory",
+    memorySaveError: "Failed to save memory",
     configNote:
       "Changes are stored in NVS. Choose an LLM provider first, then fill the shared API key and model fields. Restart the device after updating Wi-Fi, Feishu, or core LLM settings.",
 
@@ -102,12 +119,20 @@ const strings = {
     fileTypeFile: "File",
     fileEmpty: "This folder is empty.",
     fileOpen: "Open",
+    fileEdit: "Edit",
     fileDownload: "Download",
     fileDelete: "Delete",
     fileDeleteConfirm: "Delete {path}?",
     fileUploadComplete: "Upload completed",
     fileFolderCreated: "Folder created",
     fileDeleteComplete: "Delete completed",
+    fileEditorTitle: "Edit File",
+    fileEditorRefresh: "Refresh",
+    fileEditorClose: "Close",
+    fileEditorSave: "Save",
+    fileEditorSaved: "File saved",
+    fileEditorLoadError: "Failed to load file",
+    fileEditorSaveError: "Failed to save file",
     fileSelectAndPath:
       "Select a file and provide a target path that starts with /.",
     fileFolderNameRequired: "Enter a folder name.",
@@ -119,6 +144,7 @@ const strings = {
     pageSubtitle:
       "配置凭据、运行时设置，并管理 ESP 设备上的 FATFS 存储。",
     tabConfig: "配置管理",
+    tabMemory: "记忆管理",
     tabFiles: "文件管理",
 
     statusLoading: "加载中\u2026",
@@ -186,6 +212,22 @@ const strings = {
     saveBtn: "保存更改",
     saveSuccess: "设置已保存",
     saveError: "保存设置失败",
+    memoryTitle: "记忆文件",
+    memoryDescription: "管理 /memory 目录下的记忆文件。",
+    memoryCardLongTerm: "长期记忆 / Long-term Memory",
+    memoryMissing: "长期记忆文件尚不存在。",
+    memoryCreate: "创建",
+    memorySave: "保存记忆",
+    memoryRefresh: "刷新",
+    memoryAuxMissing: "该文件尚不存在。",
+    memoryCreateEmpty: "创建",
+    memoryCreateConfirm: "记忆不存在。现在创建 /memory/memory.md 吗？",
+    memoryCreated: "记忆已创建",
+    memoryEmptyCreated: "空文件已创建",
+    memorySaved: "记忆已保存",
+    memoryRefreshed: "记忆已重新加载",
+    memoryLoadError: "加载记忆失败",
+    memorySaveError: "保存记忆失败",
     configNote:
       "更改存储在 NVS 中。请先选择 LLM 提供商，然后填写 API 密钥和模型字段。更新 Wi-Fi、飞书或核心 LLM 设置后请重启设备。",
 
@@ -205,12 +247,20 @@ const strings = {
     fileTypeFile: "文件",
     fileEmpty: "此文件夹为空。",
     fileOpen: "打开",
+    fileEdit: "编辑",
     fileDownload: "下载",
     fileDelete: "删除",
     fileDeleteConfirm: "确定删除 {path}？",
     fileUploadComplete: "上传完成",
     fileFolderCreated: "文件夹已创建",
     fileDeleteComplete: "删除完成",
+    fileEditorTitle: "编辑文件",
+    fileEditorRefresh: "刷新",
+    fileEditorClose: "退出",
+    fileEditorSave: "保存",
+    fileEditorSaved: "文件已保存",
+    fileEditorLoadError: "加载文件失败",
+    fileEditorSaveError: "保存文件失败",
     fileSelectAndPath: "请选择文件并提供以 / 开头的目标路径。",
     fileFolderNameRequired: "请输入文件夹名称。",
   },
@@ -295,6 +345,7 @@ function setLang(lang) {
   applyI18n();
   buildLocaleMenu();
   renderFileRows(lastFileEntries);
+  renderMemoryState();
 }
 
 /* ═══════════════════════════════════════════════════
@@ -313,6 +364,11 @@ function initTabs() {
       btn.classList.add("active");
       const panel = document.getElementById("tab-" + btn.dataset.tab);
       if (panel) panel.classList.add("active");
+      if (btn.dataset.tab === "memory") {
+        loadMemory().catch((err) =>
+          showBanner("memoryBanner", err.message || t("memoryLoadError"), true)
+        );
+      }
     });
   });
 }
@@ -661,6 +717,22 @@ async function cancelWechatLogin() {
 
 let currentPath = "/";
 let lastFileEntries = [];
+const EDITABLE_FILE_EXTENSIONS = [".md", ".json", ".txt", ".jsonb", ".jsonc", ".lua"];
+const MEMORY_FILES = [
+  {
+    id: "memoryEditor",
+    missingId: null,
+    path: "/memory/memory.md",
+    template: "# Long-term Memory\n## Summary Labels\n\n## Active Memories\n",
+  },
+  { id: "soulEditor", missingId: "soulMissingState", path: "/memory/soul.md", template: "" },
+  { id: "identityEditor", missingId: "identityMissingState", path: "/memory/identity.md", template: "" },
+  { id: "userEditor", missingId: "userMissingState", path: "/memory/user.md", template: "" },
+];
+let memoryLoaded = false;
+let memoryContents = {};
+let memoryFilePresence = {};
+let activeEditorPath = "";
 
 function humanSize(value) {
   if (value < 1024) return value + " B";
@@ -677,6 +749,23 @@ function parentPath(path) {
 
 function joinPath(base, name) {
   return base === "/" ? "/" + name : base + "/" + name;
+}
+
+function isEditableFile(path) {
+  const lowerPath = (path || "").toLowerCase();
+  return EDITABLE_FILE_EXTENSIONS.some((ext) => lowerPath.endsWith(ext));
+}
+
+function createActionSlot(node = null, placeholderText = "") {
+  const slot = document.createElement("span");
+  slot.className = "action-slot";
+  if (node) {
+    slot.appendChild(node);
+  } else {
+    slot.classList.add("placeholder");
+    slot.textContent = placeholderText;
+  }
+  return slot;
 }
 
 function renderFileRows(entries) {
@@ -717,6 +806,8 @@ function renderFileRows(entries) {
 
       const tdActions = document.createElement("td");
       tdActions.className = "actions";
+      let editControl = null;
+      let middleControl = null;
 
       if (entry.is_dir) {
         const openBtn = document.createElement("button");
@@ -728,14 +819,26 @@ function renderFileRows(entries) {
             showBanner("fileBanner", err.message, true)
           );
         };
-        tdActions.appendChild(openBtn);
+        middleControl = openBtn;
       } else {
+        if (isEditableFile(entry.path)) {
+          const editBtn = document.createElement("button");
+          editBtn.className = "link-btn";
+          editBtn.textContent = t("fileEdit");
+          editBtn.onclick = () => {
+            openFileEditor(entry.path).catch((err) =>
+              showBanner("fileBanner", err.message || t("fileEditorLoadError"), true)
+            );
+          };
+          editControl = editBtn;
+        }
+
         const dlLink = document.createElement("a");
         dlLink.href = "/files" + entry.path;
         dlLink.textContent = t("fileDownload");
         dlLink.className = "link-btn";
         dlLink.target = "_blank";
-        tdActions.appendChild(dlLink);
+        middleControl = dlLink;
       }
 
       const delBtn = document.createElement("button");
@@ -746,7 +849,10 @@ function renderFileRows(entries) {
         if (!window.confirm(msg)) return;
         await deletePath(entry.path);
       };
-      tdActions.appendChild(delBtn);
+      const editPlaceholder = entry.is_dir ? t("fileTypeFolder") : t("fileEdit");
+      tdActions.appendChild(createActionSlot(editControl, editPlaceholder));
+      tdActions.appendChild(createActionSlot(middleControl));
+      tdActions.appendChild(createActionSlot(delBtn));
 
       row.appendChild(tdActions);
       tbody.appendChild(row);
@@ -842,6 +948,276 @@ async function deletePath(path) {
 }
 
 /* ═══════════════════════════════════════════════════
+   File Editor
+   ═══════════════════════════════════════════════════ */
+
+function openFileEditorModal() {
+  document.getElementById("fileEditorModal").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+}
+
+function closeFileEditorModal() {
+  document.getElementById("fileEditorModal").classList.add("hidden");
+  document.body.style.overflow = "";
+  activeEditorPath = "";
+  hideBanner("fileEditorBanner");
+}
+
+async function loadFileIntoEditor(path) {
+  const response = await fetch("/files" + path, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error((await response.text()) || t("fileEditorLoadError"));
+  }
+
+  const content = await response.text();
+  document.getElementById("fileEditorPath").textContent = path;
+  document.getElementById("fileEditorTextarea").value = content;
+  activeEditorPath = path;
+}
+
+async function openFileEditor(path) {
+  hideBanner("fileEditorBanner");
+  await loadFileIntoEditor(path);
+  openFileEditorModal();
+}
+
+async function refreshFileEditor() {
+  const button = document.getElementById("refreshFileEditorButton");
+  if (!activeEditorPath) return;
+
+  button.disabled = true;
+  hideBanner("fileEditorBanner");
+  try {
+    await loadFileIntoEditor(activeEditorPath);
+  } catch (err) {
+    showBanner("fileEditorBanner", err.message || t("fileEditorLoadError"), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function saveFileEditor() {
+  const button = document.getElementById("saveFileEditorButton");
+  const textarea = document.getElementById("fileEditorTextarea");
+  if (!activeEditorPath) return;
+
+  button.disabled = true;
+  hideBanner("fileEditorBanner");
+  try {
+    const response = await fetch(
+      "/api/files/upload?path=" + encodeURIComponent(activeEditorPath),
+      {
+        method: "POST",
+        cache: "no-store",
+        body: new Blob([textarea.value], { type: "text/plain; charset=utf-8" }),
+      }
+    );
+    if (!response.ok) {
+      throw new Error((await response.text()) || t("fileEditorSaveError"));
+    }
+    showBanner("fileEditorBanner", t("fileEditorSaved"));
+    await loadFiles();
+  } catch (err) {
+    showBanner("fileEditorBanner", err.message || t("fileEditorSaveError"), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   Memory Manager
+   ═══════════════════════════════════════════════════ */
+
+function renderMemoryState() {
+  MEMORY_FILES.forEach((file) => {
+    const editor = document.getElementById(file.id);
+    const missingId =
+      file.missingId || (file.id === "memoryEditor" ? "memoryMissingState" : null);
+    const missing = missingId ? document.getElementById(missingId) : null;
+    const exists = !!memoryFilePresence[file.path];
+
+    if (editor) {
+      editor.value = memoryContents[file.path] || "";
+      editor.disabled = !exists;
+      editor.classList.toggle("hidden", !exists);
+    }
+    if (missing) {
+      missing.classList.toggle("hidden", exists);
+    }
+  });
+}
+
+async function ensureMemoryDir() {
+  const response = await fetch("/api/files/mkdir", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: "/memory" }),
+  });
+  if (!response.ok) {
+    throw new Error((await response.text()) || t("memorySaveError"));
+  }
+}
+
+async function loadMemory() {
+  hideBanner("memoryBanner");
+
+  const dirResponse = await fetch("/api/files?path=" + encodeURIComponent("/memory"), {
+    cache: "no-store",
+  });
+
+  if (!dirResponse.ok) {
+    if (dirResponse.status === 404) {
+      memoryContents = {};
+      memoryFilePresence = {};
+      MEMORY_FILES.forEach((file) => {
+        memoryContents[file.path] = "";
+        memoryFilePresence[file.path] = false;
+      });
+      memoryLoaded = true;
+      renderMemoryState();
+      return;
+    }
+    throw new Error((await dirResponse.text()) || t("memoryLoadError"));
+  }
+
+  const dirData = await dirResponse.json();
+  const entries = dirData.entries || [];
+  const entryNames = new Set(entries.map((entry) => entry.name));
+  memoryContents = {};
+  memoryFilePresence = {};
+
+  for (const file of MEMORY_FILES) {
+    const fileName = file.path.split("/").pop();
+    const exists = entryNames.has(fileName);
+    memoryFilePresence[file.path] = exists;
+    if (!exists) {
+      memoryContents[file.path] = "";
+      continue;
+    }
+
+    const response = await fetch("/files" + file.path, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error((await response.text()) || t("memoryLoadError"));
+    }
+    memoryContents[file.path] = await response.text();
+  }
+
+  memoryLoaded = true;
+  renderMemoryState();
+}
+
+async function uploadMemoryContent(path, content) {
+  const response = await fetch(
+    "/api/files/upload?path=" + encodeURIComponent(path),
+    {
+      method: "POST",
+      cache: "no-store",
+      body: new Blob([content], { type: "text/markdown; charset=utf-8" }),
+    }
+  );
+  if (!response.ok) {
+    throw new Error((await response.text()) || t("memorySaveError"));
+  }
+}
+
+async function createMemory() {
+  if (!window.confirm(t("memoryCreateConfirm"))) {
+    return;
+  }
+
+  const button = document.getElementById("createMemoryButton");
+  button.disabled = true;
+  hideBanner("memoryBanner");
+
+  try {
+    await ensureMemoryDir();
+    const primaryFile = MEMORY_FILES[0];
+    await uploadMemoryContent(primaryFile.path, primaryFile.template);
+    memoryContents[primaryFile.path] = primaryFile.template;
+    memoryFilePresence[primaryFile.path] = true;
+    memoryLoaded = true;
+    renderMemoryState();
+    showBanner("memoryBanner", t("memoryCreated"));
+  } catch (err) {
+    showBanner("memoryBanner", err.message || t("memorySaveError"), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function saveMemory() {
+  const button = document.getElementById("saveMemoryButton");
+  button.disabled = true;
+  hideBanner("memoryBanner");
+
+  try {
+    await ensureMemoryDir();
+    for (const file of MEMORY_FILES) {
+      if (!memoryFilePresence[file.path]) {
+        continue;
+      }
+      const editor = document.getElementById(file.id);
+      const content = editor ? editor.value : "";
+      await uploadMemoryContent(file.path, content);
+      memoryContents[file.path] = content;
+    }
+    memoryLoaded = true;
+    renderMemoryState();
+    showBanner("memoryBanner", t("memorySaved"));
+  } catch (err) {
+    showBanner("memoryBanner", err.message || t("memorySaveError"), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function createEmptyMemoryFile(editorId) {
+  const file = MEMORY_FILES.find((item) => item.id === editorId);
+  if (!file || !file.missingId) {
+    return;
+  }
+
+  const button = document.querySelector(`.memory-init-btn[data-editor="${editorId}"]`);
+  if (button) {
+    button.disabled = true;
+  }
+  hideBanner("memoryBanner");
+
+  try {
+    await ensureMemoryDir();
+    await uploadMemoryContent(file.path, "");
+    memoryFilePresence[file.path] = true;
+    memoryContents[file.path] = "";
+    renderMemoryState();
+    showBanner("memoryBanner", t("memoryEmptyCreated"));
+  } catch (err) {
+    showBanner("memoryBanner", err.message || t("memorySaveError"), true);
+  } finally {
+    if (button) {
+      button.disabled = false;
+    }
+  }
+}
+
+async function refreshMemory() {
+  const button = document.getElementById("refreshMemoryButton");
+  button.disabled = true;
+  hideBanner("memoryBanner");
+
+  try {
+    await loadMemory();
+    showBanner("memoryBanner", t("memoryRefreshed"));
+  } catch (err) {
+    showBanner("memoryBanner", err.message || t("memoryLoadError"), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/* ═══════════════════════════════════════════════════
    Event binding
    ═══════════════════════════════════════════════════ */
 
@@ -876,6 +1252,26 @@ function bindEvents() {
     loadFiles().catch((err) => showBanner("fileBanner", err.message, true));
   });
   document.getElementById("uploadButton").addEventListener("click", uploadFile);
+  document.getElementById("createMemoryButton").addEventListener("click", createMemory);
+  document.getElementById("saveMemoryButton").addEventListener("click", saveMemory);
+  document.getElementById("refreshMemoryButton").addEventListener("click", refreshMemory);
+  document.querySelectorAll(".memory-init-btn").forEach((button) => {
+    button.addEventListener("click", () => createEmptyMemoryFile(button.dataset.editor));
+  });
+  document
+    .getElementById("closeFileEditorButton")
+    .addEventListener("click", closeFileEditorModal);
+  document
+    .getElementById("refreshFileEditorButton")
+    .addEventListener("click", refreshFileEditor);
+  document
+    .getElementById("saveFileEditorButton")
+    .addEventListener("click", saveFileEditor);
+  document.getElementById("fileEditorModal").addEventListener("click", (e) => {
+    if (e.target.id === "fileEditorModal") {
+      closeFileEditorModal();
+    }
+  });
   document.getElementById("chooseFileButton").addEventListener("click", () => {
     document.getElementById("uploadFileInput").click();
   });
@@ -931,6 +1327,16 @@ async function bootstrap() {
     await loadFiles();
   } catch (err) {
     showBanner("fileBanner", err.message || "Failed to load file list", true);
+  }
+
+  if (document.querySelector('.tab-btn[data-tab="memory"]')?.classList.contains("active")) {
+    try {
+      await loadMemory();
+    } catch (err) {
+      showBanner("memoryBanner", err.message || t("memoryLoadError"), true);
+    }
+  } else {
+    renderMemoryState();
   }
 }
 

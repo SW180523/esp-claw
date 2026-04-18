@@ -43,6 +43,7 @@ typedef enum {
 } claw_cap_state_t;
 
 typedef struct {
+    uint32_t request_id;
     const char *session_id;
     const char *channel;
     const char *chat_id;

@@ -1,5 +1,25 @@
 menu "Basic Demo Config"
 
+choice BASIC_DEMO_MEMORY_MODE
+    prompt "Memory management mode"
+    default BASIC_DEMO_MEMORY_MODE_FULL
+    help
+        Select whether the demo uses the current structured memory module
+        or a lightweight master-compatible memory flow.
+
+config BASIC_DEMO_MEMORY_MODE_FULL
+    bool "Structured memory management"
+    help
+        Enable structured memory skills and the full memory capability group.
+
+config BASIC_DEMO_MEMORY_MODE_LIGHTWEIGHT
+    bool "Lightweight memory"
+    help
+        Keep profile memory support, but switch long-term/session memory to a
+        lightweight flow without structured auto extraction.
+
+endchoice
+
 config BASIC_DEMO_WIFI_SSID
     string "Default Wi-Fi SSID"
     default ""

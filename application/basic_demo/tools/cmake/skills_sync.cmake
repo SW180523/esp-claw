@@ -45,12 +45,18 @@ function(basic_demo_enable_component_skills_sync)
 
     idf_build_get_property(python PYTHON)
     basic_demo_collect_skill_components(skill_component_args)
+    set(skill_sync_extra_args)
+
+    if(CONFIG_BASIC_DEMO_MEMORY_MODE_LIGHTWEIGHT)
+        list(APPEND skill_sync_extra_args --exclude-skill-id memory_ops)
+    endif()
 
     add_custom_target(basic_demo_sync_skills ALL
         COMMAND ${python}
                 "${CMAKE_SOURCE_DIR}/tools/sync_component_skills.py"
                 --demo-skills-dir "${arg_DEMO_SKILLS_DIR}"
                 --manifest-path "${arg_MANIFEST_PATH}"
+                ${skill_sync_extra_args}
                 ${skill_component_args}
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Sync component skills into fatfs_image/skills"

@@ -39,23 +39,51 @@
 #include "freertos/task.h"
 
 static const char *TAG = "app_esp_claw";
+#if CONFIG_BASIC_DEMO_MEMORY_MODE_FULL
+static const char *const BASIC_DEMO_LLM_VISIBLE_GROUPS[] = {
+    "cap_cli",
+    "cap_files",
+    "cap_router_mgr",
+    "cap_skill",
+    "claw_memory",
+};
+#else
 static const char *const BASIC_DEMO_LLM_VISIBLE_GROUPS[] = {
     "cap_cli",
     "cap_files",
     "cap_router_mgr",
     "cap_skill",
 };
+#endif
 
 #define BASIC_DEMO_IM_ATTACHMENT_MAX_BYTES (2 * 1024 * 1024)
 
-#define BASIC_DEMO_SYSTEM_PROMPT \
+#define BASIC_DEMO_SYSTEM_PROMPT_COMMON \
     "You are the ESP-Claw running on ESP32. " \
     "Answer briefly and plainly. " \
     "Treat Skills List as a catalog of optional skills, not as callable cap. " \
     "Use 'activate_skill' to load a skill,and you will gain more callable capabilities\n" \
     "Skills are user-facing functions, while Capabilities are internal functions used by the model.\n" \
     "After completing the task, call 'deactivete_skill' to keep the context streamlined and efficient." \
-    "When communicating with the user, refer to skills instead of Capabilities." \
+    "When communicating with the user, refer to skills instead of Capabilities. " \
+    "If the user is defining or redesigning the assistant's persona, identity, role, behavior style, speech style, or standing profile, activate the 'profile_memory_ops' skill and prefer persistent profile updates over temporary roleplay when lasting intent is clear. " \
+
+#if CONFIG_BASIC_DEMO_MEMORY_MODE_FULL
+#define BASIC_DEMO_SYSTEM_PROMPT_SUFFIX \
+    "When long-term memory is needed, activate the 'memory_ops' skill first and follow its instructions. " \
+    "Do not activate or use the memory skill for ordinary self-introductions or casual preferences unless the user explicitly asks to remember, save, update, or forget something. Automatic extraction will handle durable facts silently after the reply when appropriate. " \
+    "Use memory tools only through that skill. " \
+    "Auto-injected memory context contains summary labels, not full memory bodies. " \
+    "When detailed long-term memory is needed, use exact summary labels with memory_recall. " \
+    "Do not ask whether the user wants you to remember ordinary profile or preference statements when automatic extraction can handle them. Do not offer memory-save help unless the user explicitly asks about memory management. " \
+    "Do not use memory_records.jsonl, memory_index.json, memory_digest.log, or MEMORY.md as direct decision input.\n"
+#else
+#define BASIC_DEMO_SYSTEM_PROMPT_SUFFIX "\n"
+#endif
+
+#define BASIC_DEMO_SYSTEM_PROMPT \
+    BASIC_DEMO_SYSTEM_PROMPT_COMMON \
+    BASIC_DEMO_SYSTEM_PROMPT_SUFFIX
 
 esp_err_t basic_demo_cli_start(void);
 
@@ -109,13 +137,27 @@ static void basic_demo_time_sync_success(bool had_valid_time, void *ctx)
     }
 }
 
-static esp_err_t init_memory(const basic_demo_paths_t *paths)
+static esp_err_t init_memory(const basic_demo_settings_t *settings, const basic_demo_paths_t *paths)
 {
     claw_memory_config_t memory_config = {
         .session_root_dir = paths->memory_session_root,
         .long_term_memory_path = paths->memory_long_term_path,
         .max_session_messages = 20,
         .max_message_chars = 1024,
+        .llm_api_key = settings ? settings->llm_api_key : NULL,
+        .llm_backend_type = settings ? settings->llm_backend_type : NULL,
+        .llm_profile = settings ? settings->llm_profile : NULL,
+        .llm_provider = settings ? settings->llm_profile : NULL,
+        .llm_model = settings ? settings->llm_model : NULL,
+        .llm_base_url = settings ? settings->llm_base_url : NULL,
+        .llm_auth_type = settings ? settings->llm_auth_type : NULL,
+        .llm_timeout_ms = settings ? (uint32_t)strtoul(settings->llm_timeout_ms, NULL, 10) : 0,
+        .llm_image_max_bytes = 0,
+#if CONFIG_BASIC_DEMO_MEMORY_MODE_FULL
+        .enable_async_extract_stage_note = true,
+#else
+        .enable_async_extract_stage_note = false,
+#endif
     };
     esp_err_t err;
 
@@ -143,7 +185,7 @@ static esp_err_t init_capabilities(const basic_demo_settings_t *settings, const 
 {
     claw_cap_config_t cap_config = {
         .max_capabilities = 64,
-        .max_groups = 20,
+        .max_groups = 24,
     };
 
     ESP_RETURN_ON_ERROR(claw_cap_init(&cap_config), TAG, "Failed to init claw_cap");
@@ -217,6 +259,9 @@ static esp_err_t init_capabilities(const basic_demo_settings_t *settings, const 
     ESP_RETURN_ON_ERROR(cap_mcp_client_register_group(), TAG, "Failed to register MCP client cap");
     ESP_RETURN_ON_ERROR(cap_mcp_server_register_group(), TAG, "Failed to register MCP server cap");
     ESP_RETURN_ON_ERROR(cap_skill_mgr_register_group(), TAG, "Failed to register skill cap");
+#if CONFIG_BASIC_DEMO_MEMORY_MODE_FULL
+    ESP_RETURN_ON_ERROR(claw_memory_register_group(), TAG, "Failed to register claw_memory group");
+#endif
     ESP_RETURN_ON_ERROR(cap_time_register_group(), TAG, "Failed to register time cap");
     ESP_RETURN_ON_ERROR(cap_llm_inspect_register_group(), TAG, "Failed to register LLM inspect cap");
     ESP_RETURN_ON_ERROR(cap_web_search_register_group(), TAG, "Failed to register web search cap");
@@ -293,7 +338,7 @@ esp_err_t app_claw_start(const basic_demo_settings_t *settings)
                             .persist_after_fire = true,
                         }),
                         TAG, "Failed to init scheduler");
-    ESP_RETURN_ON_ERROR(init_memory(&paths), TAG, "Failed to init memory");
+    ESP_RETURN_ON_ERROR(init_memory(settings, &paths), TAG, "Failed to init memory");
     ESP_RETURN_ON_ERROR(init_skills(&paths), TAG, "Failed to init skills");
     ESP_RETURN_ON_ERROR(init_capabilities(settings, &paths), TAG, "Failed to init capabilities");
     ESP_RETURN_ON_ERROR(claw_event_router_register_outbound_binding("qq", "qq_send_message"), TAG, "Failed to bind QQ outbound");
@@ -309,7 +354,13 @@ esp_err_t app_claw_start(const basic_demo_settings_t *settings)
     core_config.auth_type = settings->llm_auth_type;
     core_config.timeout_ms = (uint32_t)strtoul(settings->llm_timeout_ms, NULL, 10);
     core_config.system_prompt = BASIC_DEMO_SYSTEM_PROMPT;
+#if CONFIG_BASIC_DEMO_MEMORY_MODE_FULL
     core_config.append_session_turn = claw_memory_append_session_turn_callback;
+    core_config.on_request_start = claw_memory_request_start_callback;
+    core_config.collect_stage_note = claw_memory_stage_note_callback;
+#else
+    core_config.append_session_turn = claw_memory_append_session_turn_callback;
+#endif
     core_config.call_cap = claw_cap_call_from_core;
     core_config.task_stack_size = 6 * 1024;
     core_config.task_priority = 5;
@@ -317,7 +368,7 @@ esp_err_t app_claw_start(const basic_demo_settings_t *settings)
     core_config.max_tool_iterations = 10;
     core_config.request_queue_len = 4;
     core_config.response_queue_len = 4;
-    core_config.max_context_providers = 5;
+    core_config.max_context_providers = 6;
 
     if (!llm_enabled) {
         ESP_LOGW(TAG, "LLM is not fully configured. Provider=%s profile=%s model=%s. "
@@ -328,11 +379,19 @@ esp_err_t app_claw_start(const basic_demo_settings_t *settings)
         ESP_LOGI(TAG, "Starting LLM provider=%s profile=%s backend=%s model=%s", basic_demo_llm_provider_name(settings), settings->llm_profile,
                  settings->llm_backend_type[0] ? settings->llm_backend_type : "(default)", settings->llm_model);
         ESP_RETURN_ON_ERROR(claw_core_init(&core_config), TAG, "Failed to init claw_core");
+        ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_memory_profile_provider), TAG, "Failed to add editable profile memory provider");
+
+#if CONFIG_BASIC_DEMO_MEMORY_MODE_FULL
         ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_memory_long_term_provider), TAG, "Failed to add long-term memory provider");
-        ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_memory_session_history_provider), TAG, "Failed to add session history provider");
-        ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_skill_skills_list_provider), TAG, "Failed to add skills list provider");
-        ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_skill_active_skill_docs_provider), TAG, "Failed to add active skill docs provider");
-        ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_cap_tools_provider), TAG, "Failed to add cap tools provider");
+#else
+        ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_memory_long_term_lightweight_provider), TAG,"Failed to add lightweight long-term memory provider");
+#endif
+
+ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_memory_session_history_provider), TAG, "Failed to add session history provider");
+ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_skill_skills_list_provider), TAG, "Failed to add skills list provider");
+ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_skill_active_skill_docs_provider), TAG, "Failed to add active skill docs provider");
+ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_cap_tools_provider), TAG, "Failed to add cap tools provider");
+
         ESP_RETURN_ON_ERROR(claw_core_start(), TAG, "Failed to start claw_core");
     }
 

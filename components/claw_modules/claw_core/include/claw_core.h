@@ -47,6 +47,13 @@ typedef esp_err_t (*claw_core_append_session_turn_fn)(const char *session_id,
                                                       const char *assistant_text,
                                                       void *user_ctx);
 
+typedef esp_err_t (*claw_core_request_start_fn)(const claw_core_request_t *request,
+                                                void *user_ctx);
+
+typedef esp_err_t (*claw_core_stage_note_fn)(const claw_core_request_t *request,
+                                             char **out_note,
+                                             void *user_ctx);
+
 typedef struct claw_core_response claw_core_response_t;
 
 typedef enum {
@@ -90,6 +97,10 @@ typedef struct {
     const char *system_prompt;
     claw_core_append_session_turn_fn append_session_turn;
     void *append_session_turn_user_ctx;
+    claw_core_request_start_fn on_request_start;
+    void *on_request_start_user_ctx;
+    claw_core_stage_note_fn collect_stage_note;
+    void *collect_stage_note_user_ctx;
     claw_core_call_cap_fn call_cap;
     void *cap_user_ctx;
     uint32_t task_stack_size;

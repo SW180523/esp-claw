@@ -60,6 +60,10 @@ typedef struct {
     char *system_prompt;
     claw_core_append_session_turn_fn append_session_turn;
     void *append_session_turn_user_ctx;
+    claw_core_request_start_fn on_request_start;
+    void *on_request_start_user_ctx;
+    claw_core_stage_note_fn collect_stage_note;
+    void *collect_stage_note_user_ctx;
     claw_core_call_cap_fn call_cap;
     void *cap_user_ctx;
     claw_core_context_provider_t *context_providers;
@@ -523,6 +527,45 @@ static void publish_stage_tool_calls(const claw_core_request_t *request,
     (void)response;
     (void)iteration;
 #endif
+}
+
+static void publish_stage_note_for_round(const claw_core_request_t *request,
+                                         uint32_t round_index)
+{
+    char *stage_note = NULL;
+    esp_err_t err;
+
+    if (!s_core.collect_stage_note) {
+        return;
+    }
+
+    err = s_core.collect_stage_note(request, &stage_note, s_core.collect_stage_note_user_ctx);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "stage_note callback failed: %s", esp_err_to_name(err));
+        free(stage_note);
+        return;
+    }
+
+#if CONFIG_CLAW_CORE_STAGE_VERBOSITY_VERBOSE
+    char buf[256];
+    int written;
+
+    if (!stage_note || !stage_note[0]) {
+        free(stage_note);
+        return;
+    }
+
+    written = snprintf(buf, sizeof(buf), "🦞 [Round %" PRIu32 "] %s", round_index + 1, stage_note);
+    if (written < 0 || (size_t)written >= sizeof(buf)) {
+        free(stage_note);
+        return;
+    }
+    publish_stage_event(request, buf);
+#else
+    (void)request;
+    (void)round_index;
+#endif
+    free(stage_note);
 }
 
 static esp_err_t append_user_message(cJSON *messages, const char *text)
@@ -1002,6 +1045,15 @@ static void claw_core_task(void *arg)
             response.view.error_message = dup_string("Failed to allocate response target");
             goto finish_request;
         }
+        if (s_core.on_request_start) {
+            err = s_core.on_request_start(&request.view, s_core.on_request_start_user_ctx);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG,
+                         "request_start request=%" PRIu32 " failed: %s",
+                         request.view.request_id,
+                         esp_err_to_name(err));
+            }
+        }
 
         runtime_messages = cJSON_CreateArray();
         if (!runtime_messages) {
@@ -1038,6 +1090,7 @@ static void claw_core_task(void *arg)
             }
 
             if (llm_response.tool_call_count == 0) {
+                publish_stage_note_for_round(&request.view, iteration);
                 claw_core_finish_from_plain_text(request.view.request_id,
                                                  &llm_response,
                                                  &response.view);
@@ -1143,6 +1196,10 @@ esp_err_t claw_core_init(const claw_core_config_t *config)
     }
     s_core.append_session_turn = config->append_session_turn;
     s_core.append_session_turn_user_ctx = config->append_session_turn_user_ctx;
+    s_core.on_request_start = config->on_request_start;
+    s_core.on_request_start_user_ctx = config->on_request_start_user_ctx;
+    s_core.collect_stage_note = config->collect_stage_note;
+    s_core.collect_stage_note_user_ctx = config->collect_stage_note_user_ctx;
     s_core.call_cap = config->call_cap;
     s_core.cap_user_ctx = config->cap_user_ctx;
 

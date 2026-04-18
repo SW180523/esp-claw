@@ -69,6 +69,7 @@
         <!-- Tabs -->
         <div class="tabs">
           <button type="button" class="tab-btn active" data-tab="config" data-i18n="tabConfig">Configuration</button>
+          <button type="button" class="tab-btn" data-tab="memory" data-i18n="tabMemory">Memory</button>
           <button type="button" class="tab-btn" data-tab="files" data-i18n="tabFiles">File Manager</button>
         </div>
 
@@ -312,6 +313,77 @@
           </div>
         </div>
 
+        <!-- ═══ MEMORY TAB ═══ -->
+        <div class="tab-panel" id="tab-memory">
+          <div class="memory-panel">
+            <div id="memoryBanner" class="banner"></div>
+
+            <div class="memory-header">
+              <div>
+                <h2 class="memory-title" data-i18n="memoryTitle">Memory Files</h2>
+                <p class="memory-note" data-i18n="memoryDescription">Manage the device memory files under /memory.</p>
+              </div>
+              <div class="memory-toolbar">
+                <code class="file-path">/memory</code>
+                <button type="button" class="btn-secondary btn-sm" id="refreshMemoryButton" data-i18n="memoryRefresh">Refresh</button>
+              </div>
+            </div>
+
+            <div class="memory-grid">
+              <section class="memory-card">
+                <div class="memory-card-header">
+                  <h3 class="memory-card-title" data-i18n="memoryCardLongTerm">Long-term Memory / 长期记忆</h3>
+                  <code class="file-path">/memory/memory.md</code>
+                </div>
+                <div id="memoryMissingState" class="memory-inline-empty hidden">
+                  <p class="memory-note" data-i18n="memoryMissing">Long-term memory file does not exist yet.</p>
+                  <button type="button" class="btn-secondary btn-sm" id="createMemoryButton" data-i18n="memoryCreate">Create</button>
+                </div>
+                <textarea id="memoryEditor" class="memory-editor hidden" spellcheck="false"></textarea>
+              </section>
+
+              <section class="memory-card">
+                <div class="memory-card-header">
+                  <h3 class="memory-card-title">Soul / 灵魂</h3>
+                  <code class="file-path">/memory/soul.md</code>
+                </div>
+                <div id="soulMissingState" class="memory-inline-empty hidden">
+                  <p class="memory-note" data-i18n="memoryAuxMissing">This file does not exist yet.</p>
+                  <button type="button" class="btn-secondary btn-sm memory-init-btn" data-editor="soulEditor" data-i18n="memoryCreateEmpty">Create</button>
+                </div>
+                <textarea id="soulEditor" class="memory-editor memory-editor-sm hidden" spellcheck="false"></textarea>
+              </section>
+
+              <section class="memory-card">
+                <div class="memory-card-header">
+                  <h3 class="memory-card-title">Identity / 身份</h3>
+                  <code class="file-path">/memory/identity.md</code>
+                </div>
+                <div id="identityMissingState" class="memory-inline-empty hidden">
+                  <p class="memory-note" data-i18n="memoryAuxMissing">This file does not exist yet.</p>
+                  <button type="button" class="btn-secondary btn-sm memory-init-btn" data-editor="identityEditor" data-i18n="memoryCreateEmpty">Create</button>
+                </div>
+                <textarea id="identityEditor" class="memory-editor memory-editor-sm hidden" spellcheck="false"></textarea>
+              </section>
+
+              <section class="memory-card">
+                <div class="memory-card-header">
+                  <h3 class="memory-card-title">User Info / 用户信息</h3>
+                  <code class="file-path">/memory/user.md</code>
+                </div>
+                <div id="userMissingState" class="memory-inline-empty hidden">
+                  <p class="memory-note" data-i18n="memoryAuxMissing">This file does not exist yet.</p>
+                  <button type="button" class="btn-secondary btn-sm memory-init-btn" data-editor="userEditor" data-i18n="memoryCreateEmpty">Create</button>
+                </div>
+                <textarea id="userEditor" class="memory-editor memory-editor-sm hidden" spellcheck="false"></textarea>
+              </section>
+            </div>
+            <div class="memory-actions">
+              <button type="button" class="btn-primary" id="saveMemoryButton" data-i18n="memorySave">Save Memory</button>
+            </div>
+          </div>
+        </div>
+
         <!-- ═══ FILES TAB ═══ -->
         <div class="tab-panel" id="tab-files">
           <div class="file-panel">
@@ -362,6 +434,24 @@
 
       </div><!-- /.main-content -->
     </main>
+
+    <div id="fileEditorModal" class="modal-overlay hidden">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" data-i18n="fileEditorTitle">Edit File</h2>
+            <code class="file-path" id="fileEditorPath">/</code>
+          </div>
+          <button type="button" class="btn-secondary btn-sm" id="closeFileEditorButton" data-i18n="fileEditorClose">Close</button>
+        </div>
+        <div id="fileEditorBanner" class="banner"></div>
+        <textarea id="fileEditorTextarea" class="modal-editor" spellcheck="false"></textarea>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary btn-sm" id="refreshFileEditorButton" data-i18n="fileEditorRefresh">Refresh</button>
+          <button type="button" class="btn-primary btn-sm" id="saveFileEditorButton" data-i18n="fileEditorSave">Save</button>
+        </div>
+      </div>
+    </div>
 
     <!-- ── Footer ── -->
     <footer>

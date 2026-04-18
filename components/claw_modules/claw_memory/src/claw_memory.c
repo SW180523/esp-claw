@@ -3,702 +3,709 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "claw_memory.h"
+#include "claw_memory_internal.h"
 
-#include <inttypes.h>
-#include <stdbool.h>
-#include <ctype.h>
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdarg.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 
 #include "esp_log.h"
 
 static const char *TAG = "claw_memory";
-static const char *DEFAULT_LONG_TERM_MEMORY =
-    "# Long-term Memory\n\n"
-    "(empty - ESP-Claw will write memories here as it learns)\n";
 
-#define CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES 20
-#define CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS    1024
+claw_memory_state_t s_memory = {0};
 
-typedef struct {
-    int initialized;
-    char session_root_dir[128];
-    char long_term_memory_path[128];
-    size_t max_session_messages;
-    size_t max_message_chars;
-} claw_memory_state_t;
-
-static claw_memory_state_t s_memory = {0};
-
-static void safe_copy(char *dst, size_t dst_size, const char *src)
+static void claw_memory_fill_defaults(claw_memory_item_t *item)
 {
-    size_t len;
-
-    if (!dst || dst_size == 0) {
+    if (!item) {
         return;
     }
-    if (!src) {
-        dst[0] = '\0';
-        return;
+    if (!item->source[0]) {
+        safe_copy(item->source, sizeof(item->source), "manual");
     }
-
-    len = strnlen(src, dst_size - 1);
-    memcpy(dst, src, len);
-    dst[len] = '\0';
 }
 
-static char *alloc_zeroed(size_t size)
+static esp_err_t claw_memory_store_prepared_item_internal(claw_memory_item_t *item,
+                                                          const char *digest_action,
+                                                          const char *digest_extra,
+                                                          const char *ignore_existing_id,
+                                                          bool *out_changed)
 {
-    if (size == 0) {
-        return NULL;
-    }
-    return calloc(1, size);
-}
-
-static char *dup_printf(const char *fmt, ...)
-{
-    va_list args;
-    va_list copy;
-    int needed;
-    char *buf;
-
-    va_start(args, fmt);
-    va_copy(copy, args);
-    needed = vsnprintf(NULL, 0, fmt, copy);
-    va_end(copy);
-    if (needed < 0) {
-        va_end(args);
-        return NULL;
-    }
-
-    buf = calloc(1, (size_t)needed + 1);
-    if (!buf) {
-        va_end(args);
-        return NULL;
-    }
-
-    vsnprintf(buf, (size_t)needed + 1, fmt, args);
-    va_end(args);
-    return buf;
-}
-
-static size_t utf8_sequence_len(unsigned char ch)
-{
-    if (ch < 0x80) {
-        return 1;
-    }
-    if ((ch & 0xE0) == 0xC0) {
-        return 2;
-    }
-    if ((ch & 0xF0) == 0xE0) {
-        return 3;
-    }
-    if ((ch & 0xF8) == 0xF0) {
-        return 4;
-    }
-    return 0;
-}
-
-static bool utf8_sequence_valid(const unsigned char *src, size_t len)
-{
+    claw_memory_item_list_t items = {0};
+    cJSON *index_root = NULL;
+    char labels[CLAW_MEMORY_MAX_SUMMARIES][CLAW_MEMORY_MAX_LABEL_TEXT];
+    char item_key[48];
+    size_t label_count = 0;
     size_t i;
+    esp_err_t err;
 
-    if (!src || len == 0) {
-        return false;
-    }
-    for (i = 1; i < len; i++) {
-        if (src[i] == '\0') {
-            return false;
-        }
-        if ((src[i] & 0xC0) != 0x80) {
-            return false;
-        }
-    }
-    return true;
-}
-
-static size_t text_buffer_size(size_t max_chars)
-{
-    if (max_chars == 0) {
-        max_chars = CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS;
-    }
-    return (max_chars * 4) + 1;
-}
-
-static void normalize_text(const char *src, char *dst, size_t dst_size, size_t max_chars)
-{
-    size_t off = 0;
-    size_t chars = 0;
-
-    if (!dst || dst_size == 0) {
-        return;
-    }
-    dst[0] = '\0';
-    if (!src) {
-        return;
-    }
-
-    while (*src && off + 1 < dst_size && chars < max_chars) {
-        const unsigned char *cur = (const unsigned char *)src;
-        size_t seq_len = utf8_sequence_len(*cur);
-
-        if (*cur < 0x80) {
-            char ch = (char) * cur++;
-            src = (const char *)cur;
-            if (ch == '\r' || ch == '\n' || ch == '\t') {
-                ch = ' ';
-            }
-            dst[off++] = ch;
-            chars++;
-            continue;
-        }
-
-        if (seq_len == 0 || !utf8_sequence_valid(cur, seq_len)) {
-            src++;
-            continue;
-        }
-        if (off + seq_len >= dst_size) {
-            break;
-        }
-        memcpy(dst + off, cur, seq_len);
-        off += seq_len;
-        src += seq_len;
-        chars++;
-    }
-    dst[off] = '\0';
-}
-
-static void sanitize_session_id(const char *session_id, char *buf, size_t size)
-{
-    size_t off = 0;
-
-    if (!buf || size == 0) {
-        return;
-    }
-    buf[0] = '\0';
-    if (!session_id) {
-        return;
-    }
-
-    while (*session_id && off + 1 < size) {
-        char ch = *session_id++;
-        if (isalnum((unsigned char)ch) || ch == '-' || ch == '_') {
-            buf[off++] = ch;
-        } else {
-            buf[off++] = '_';
-        }
-    }
-    buf[off] = '\0';
-}
-
-static esp_err_t ensure_parent_dir(const char *path)
-{
-    char *tmp = NULL;
-    char *slash;
-    esp_err_t err = ESP_FAIL;
-
-    if (!path || path[0] == '\0') {
+    if (!item || !item->content[0]) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    tmp = strdup(path);
-    if (!tmp) {
-        return ESP_ERR_NO_MEM;
+    if (out_changed) {
+        *out_changed = false;
     }
-    slash = strrchr(tmp, '/');
-    if (!slash) {
-        free(tmp);
-        return ESP_OK;
+
+    trim_whitespace(item->content);
+    trim_whitespace(item->tags);
+    trim_whitespace(item->keywords);
+    claw_memory_normalize_item_metadata(item);
+    if (!item->content[0]) {
+        return ESP_ERR_INVALID_ARG;
     }
-    *slash = '\0';
-    if (tmp[0] == '\0') {
-        free(tmp);
-        return ESP_OK;
+
+    claw_memory_fill_defaults(item);
+
+    if (!item->id[0]) {
+        claw_memory_make_id(item->id, sizeof(item->id));
     }
-    {
-        struct stat st;
-        if (stat(tmp, &st) == 0 && S_ISDIR(st.st_mode)) {
-            free(tmp);
+
+    if (!item->created_at) {
+        item->created_at = claw_memory_now_sec();
+    }
+    item->updated_at = claw_memory_now_sec();
+    claw_memory_build_item_key(item, item_key, sizeof(item_key));
+
+    err = claw_memory_load_current_items(&items);
+    if (err != ESP_OK) {
+        return err;
+    }
+    for (i = 0; i < items.count; i++) {
+        if (ignore_existing_id && ignore_existing_id[0] &&
+            strcmp(items.items[i].id, ignore_existing_id) == 0) {
+            continue;
+        }
+        if (!items.items[i].deleted) {
+            char existing_key[48];
+
+            claw_memory_build_item_key(&items.items[i], existing_key, sizeof(existing_key));
+            if (existing_key[0] && strcmp(existing_key, item_key) == 0) {
+                safe_copy(item->id, sizeof(item->id), items.items[i].id);
+                *item = items.items[i];
+                claw_memory_item_list_free(&items);
+                return ESP_OK;
+            }
+        }
+        if (claw_memory_items_semantically_match(&items.items[i], item)) {
+            safe_copy(item->id, sizeof(item->id), items.items[i].id);
+            *item = items.items[i];
+            claw_memory_item_list_free(&items);
             return ESP_OK;
         }
     }
-    if (mkdir(tmp, 0755) == 0 || errno == EEXIST) {
-        free(tmp);
-        return ESP_OK;
-    }
-    {
-        char *probe_path = dup_printf("%s/.claw_memory_probe", tmp);
-        FILE *probe;
 
-        probe = probe_path ? fopen(probe_path, "w") : NULL;
-        if (probe) {
-            fclose(probe);
-            remove(probe_path);
-            err = ESP_OK;
-        }
-        free(probe_path);
+    err = claw_memory_load_index(&index_root);
+    if (err != ESP_OK) {
+        claw_memory_item_list_free(&items);
+        return err;
     }
-    free(tmp);
+
+    claw_memory_collect_summary_labels(item, labels, &label_count);
+    item->summary_id_count = 0;
+    for (i = 0; i < label_count && i < CLAW_MEMORY_MAX_SUMMARIES; i++) {
+        int summary_id = 0;
+
+        err = claw_memory_ensure_summary_label(index_root, labels[i], 0, &summary_id);
+        if (err != ESP_OK) {
+            cJSON_Delete(index_root);
+            claw_memory_item_list_free(&items);
+            return err;
+        }
+        item->summary_ids[item->summary_id_count++] = (uint16_t)summary_id;
+    }
+
+    err = claw_memory_append_record(item);
+    if (err == ESP_OK) {
+        claw_memory_adjust_summary_stats(index_root, item, 1);
+        claw_memory_item_list_push(&items, item);
+        claw_memory_rebuild_keyword_index(index_root, &items);
+        err = claw_memory_save_index(index_root);
+    }
+    if (err == ESP_OK) {
+        err = claw_memory_sync_markdown(&items, index_root);
+    }
+    if (err == ESP_OK) {
+        claw_memory_append_digest_line(digest_action, item, digest_extra);
+        s_memory.write_changes_since_compact++;
+        if (out_changed) {
+            *out_changed = true;
+        }
+    }
+
+    cJSON_Delete(index_root);
+    claw_memory_item_list_free(&items);
+    if (err == ESP_OK) {
+        err = claw_memory_maybe_compact();
+    }
     return err;
 }
 
-static esp_err_t ensure_dir(const char *path)
+static esp_err_t claw_memory_store_prepared_item(claw_memory_item_t *item,
+                                                 const char *digest_action,
+                                                 const char *digest_extra,
+                                                 bool *out_changed)
 {
-    struct stat st;
-    char *probe_path = NULL;
-    FILE *probe = NULL;
-
-    if (!path || path[0] == '\0') {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
-        return ESP_OK;
-    }
-    if (mkdir(path, 0755) == 0 || errno == EEXIST) {
-        return ESP_OK;
-    }
-    probe_path = dup_printf("%s/.claw_memory_probe", path);
-    if (!probe_path) {
-        return ESP_ERR_NO_MEM;
-    }
-    probe = fopen(probe_path, "w");
-    if (probe) {
-        fclose(probe);
-        remove(probe_path);
-        free(probe_path);
-        return ESP_OK;
-    }
-    free(probe_path);
-    return ESP_FAIL;
+    return claw_memory_store_prepared_item_internal(item,
+                                                    digest_action,
+                                                    digest_extra,
+                                                    NULL,
+                                                    out_changed);
 }
 
-static char *session_path_dup(const char *session_id)
+static void claw_memory_apply_update_patch(claw_memory_item_t *dst,
+                                           const claw_memory_item_t *patch)
 {
-    char safe_session_id[48];
-    uint32_t hash = 2166136261u;
-    const unsigned char *p = (const unsigned char *)session_id;
-    size_t len;
-    char *path;
-
-    sanitize_session_id(session_id, safe_session_id, sizeof(safe_session_id));
-    for (; p && *p; ++p) {
-        hash ^= *p;
-        hash *= 16777619u;
-    }
-
-    len = strnlen(safe_session_id, sizeof(safe_session_id) - 1);
-    if (len > 24) {
-        safe_session_id[24] = '\0';
-    }
-
-    path = dup_printf("%s/s_%s_%08" PRIx32 ".log",
-                      s_memory.session_root_dir,
-                      safe_session_id[0] ? safe_session_id : "default",
-                      hash);
-    return path;
-}
-
-static void json_escape(const char *src, char *dst, size_t dst_size)
-{
-    size_t off = 0;
-
-    if (!dst || dst_size == 0) {
-        return;
-    }
-    dst[0] = '\0';
-    if (!src) {
+    if (!dst || !patch) {
         return;
     }
 
-    while (*src && off + 1 < dst_size) {
-        char ch = *src++;
-        if (ch == '"' || ch == '\\') {
-            if (off + 2 >= dst_size) {
-                break;
-            }
-            dst[off++] = '\\';
-            dst[off++] = ch;
-        } else {
-            dst[off++] = ch;
-        }
+    if (patch->source[0]) {
+        safe_copy(dst->source, sizeof(dst->source), patch->source);
     }
-    dst[off] = '\0';
+    if (patch->content[0]) {
+        safe_copy(dst->content, sizeof(dst->content), patch->content);
+    }
+    if (patch->tags[0]) {
+        safe_copy(dst->tags, sizeof(dst->tags), patch->tags);
+    }
+    if (patch->keywords[0]) {
+        safe_copy(dst->keywords, sizeof(dst->keywords), patch->keywords);
+    }
 }
 
-static esp_err_t append_line(FILE *file, const char *role, const char *text)
+static esp_err_t claw_memory_prepare_updated_replacement(const claw_memory_item_t *existing,
+                                                         const claw_memory_item_t *patch,
+                                                         claw_memory_item_t *replacement)
 {
-    char *normalized = NULL;
-    size_t max_chars = s_memory.max_message_chars;
-    size_t normalized_size;
-    esp_err_t err = ESP_OK;
-
-    if (!file || !role || !text) {
+    if (!existing || !patch || !replacement) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (max_chars > CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS) {
-        max_chars = CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS;
-    }
-    normalized_size = text_buffer_size(max_chars);
-    normalized = alloc_zeroed(normalized_size);
-    if (!normalized) {
-        return ESP_ERR_NO_MEM;
-    }
-    normalize_text(text, normalized, normalized_size, max_chars);
-    fprintf(file, "%s\t%s\n", role, normalized);
-    free(normalized);
-    return err;
-}
+    *replacement = *existing;
+    memset(replacement->id, 0, sizeof(replacement->id));
+    memset(replacement->summary_ids, 0, sizeof(replacement->summary_ids));
+    replacement->summary_id_count = 0;
+    replacement->deleted = 0;
+    replacement->access_count = 0;
+    replacement->created_at = 0;
+    replacement->updated_at = 0;
 
-static esp_err_t ensure_long_term_memory_file(const char *path)
-{
-    FILE *file;
-
-    if (!path || path[0] == '\0') {
+    claw_memory_apply_update_patch(replacement, patch);
+    trim_whitespace(replacement->content);
+    trim_whitespace(replacement->tags);
+    trim_whitespace(replacement->keywords);
+    claw_memory_normalize_item_metadata(replacement);
+    claw_memory_fill_defaults(replacement);
+    if (!replacement->content[0]) {
         return ESP_ERR_INVALID_ARG;
     }
-
-    file = fopen(path, "r");
-    if (file) {
-        fclose(file);
-        return ESP_OK;
-    }
-
-    file = fopen(path, "w");
-    if (!file) {
-        return ESP_FAIL;
-    }
-
-    if (fputs(DEFAULT_LONG_TERM_MEMORY, file) < 0) {
-        fclose(file);
-        return ESP_FAIL;
-    }
-
-    fclose(file);
     return ESP_OK;
 }
 
-static size_t session_history_json_size(void)
+static bool claw_memory_item_matches_summary_ids(const claw_memory_item_t *item,
+                                                 const int *summary_ids,
+                                                 size_t summary_id_count)
 {
-    size_t max_msgs = s_memory.max_session_messages;
-    size_t max_chars = s_memory.max_message_chars;
-
-    if (max_msgs == 0) {
-        max_msgs = CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES;
-    }
-    if (max_chars == 0 || max_chars > CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS) {
-        max_chars = CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS;
-    }
-
-    return (max_msgs * ((text_buffer_size(max_chars) * 2) + 64)) + 16;
-}
-
-static esp_err_t read_file_dup(const char *path, char **out_buf)
-{
-    FILE *file = NULL;
-    long size = 0;
-    char *buf = NULL;
-    size_t read_bytes;
-
-    if (!path || !out_buf) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    *out_buf = NULL;
-
-    file = fopen(path, "rb");
-    if (!file) {
-        return ESP_ERR_NOT_FOUND;
-    }
-    if (fseek(file, 0, SEEK_END) != 0) {
-        fclose(file);
-        return ESP_FAIL;
-    }
-    size = ftell(file);
-    if (size < 0) {
-        fclose(file);
-        return ESP_FAIL;
-    }
-    if (fseek(file, 0, SEEK_SET) != 0) {
-        fclose(file);
-        return ESP_FAIL;
-    }
-
-    buf = calloc(1, (size_t)size + 1);
-    if (!buf) {
-        fclose(file);
-        return ESP_ERR_NO_MEM;
-    }
-
-    read_bytes = fread(buf, 1, (size_t)size, file);
-    fclose(file);
-    buf[read_bytes] = '\0';
-    *out_buf = buf;
-    return ESP_OK;
-}
-
-static esp_err_t claw_memory_session_load_json(const char *session_id,
-                                               char *buf,
-                                               size_t size)
-{
-    char *path = NULL;
-    FILE *file = NULL;
-    char *line = NULL;
-    char **roles = NULL;
-    char **contents = NULL;
-    char *escaped = NULL;
-    size_t count = 0;
-    size_t next = 0;
     size_t i;
-    size_t max_msgs;
-    size_t max_chars;
-    size_t max_bytes;
-    size_t line_size;
-    size_t off = 0;
+    size_t j;
 
-    if (!s_memory.initialized || !session_id || !buf || size == 0) {
-        return ESP_ERR_INVALID_STATE;
+    if (!item || summary_id_count == 0) {
+        return true;
     }
-
-    max_msgs = s_memory.max_session_messages;
-    max_chars = s_memory.max_message_chars;
-    if (max_msgs == 0) {
-        max_msgs = CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES;
-    }
-    if (max_chars == 0 || max_chars > CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS) {
-        max_chars = CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS;
-    }
-    max_bytes = text_buffer_size(max_chars) - 1;
-
-    path = session_path_dup(session_id);
-    line_size = max_bytes + 16;
-    line = alloc_zeroed(line_size);
-    escaped = alloc_zeroed((max_bytes * 2) + 1);
-    if (!path || !line || !escaped) {
-        free(path);
-        free(line);
-        free(escaped);
-        return ESP_ERR_NO_MEM;
-    }
-
-    file = fopen(path, "r");
-    if (!file) {
-        buf[0] = '\0';
-        free(path);
-        free(line);
-        free(escaped);
-        return ESP_ERR_NOT_FOUND;
-    }
-
-    roles = calloc(max_msgs, sizeof(char *));
-    contents = calloc(max_msgs, sizeof(char *));
-    if (!roles || !contents) {
-        fclose(file);
-        free(path);
-        free(line);
-        free(escaped);
-        free(roles);
-        free(contents);
-        return ESP_ERR_NO_MEM;
-    }
-
-    for (i = 0; i < max_msgs; i++) {
-        roles[i] = calloc(1, 16);
-        contents[i] = calloc(1, max_bytes + 1);
-        if (!roles[i] || !contents[i]) {
-            fclose(file);
-            free(path);
-            free(line);
-            free(escaped);
-            for (i = 0; i < max_msgs; i++) {
-                free(roles[i]);
-                free(contents[i]);
+    for (i = 0; i < summary_id_count; i++) {
+        for (j = 0; j < item->summary_id_count && j < CLAW_MEMORY_MAX_SUMMARIES; j++) {
+            if ((int)item->summary_ids[j] == summary_ids[i]) {
+                return true;
             }
-            free(roles);
-            free(contents);
-            return ESP_ERR_NO_MEM;
+        }
+    }
+    return false;
+}
+
+static esp_err_t claw_memory_render_item_list_json(const claw_memory_item_list_t *items,
+                                                   cJSON *index_root,
+                                                   char **out_json)
+{
+    cJSON *array = NULL;
+    char *text = NULL;
+    size_t i;
+
+    if (!out_json) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_json = NULL;
+
+    array = cJSON_CreateArray();
+    if (!array) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    for (i = 0; items && i < items->count; i++) {
+        cJSON *json = claw_memory_item_to_json(&items->items[i], index_root);
+        if (json) {
+            cJSON_AddItemToArray(array, json);
         }
     }
 
-    while (fgets(line, (int)line_size, file)) {
-        char *tab = strchr(line, '\t');
-        char *value;
-        if (!tab) {
-            ESP_LOGW(TAG, "Skipping malformed session line for %s: %.32s",
-                     session_id, line);
-            continue;
-        }
-        *tab = '\0';
-        value = tab + 1;
-        value[strcspn(value, "\r\n")] = '\0';
-        safe_copy(roles[next], 16, line);
-        safe_copy(contents[next], max_bytes + 1, value);
-        next = (next + 1) % max_msgs;
-        if (count < max_msgs) {
-            count++;
-        }
+    text = cJSON_PrintUnformatted(array);
+    cJSON_Delete(array);
+    if (!text) {
+        return ESP_ERR_NO_MEM;
     }
-    fclose(file);
-    free(path);
-
-    buf[0] = '\0';
-    off += snprintf(buf + off, size - off, "[");
-    for (i = 0; i < count && off + 1 < size; i++) {
-        size_t idx = (count < max_msgs) ? i : ((next + i) % max_msgs);
-        const char *role = strcmp(roles[idx], "assistant") == 0 ? "assistant" : "user";
-
-        escaped[0] = '\0';
-        json_escape(contents[idx], escaped, (max_bytes * 2) + 1);
-        off += snprintf(buf + off, size - off,
-                        "%s{\"role\":\"%s\",\"content\":\"%s\"}",
-                        (i == 0) ? "" : ",",
-                        role,
-                        escaped);
-    }
-    if (off + 2 <= size) {
-        snprintf(buf + off, size - off, "]");
-    } else if (size > 0) {
-        buf[size - 1] = '\0';
-    }
-
-    for (i = 0; i < max_msgs; i++) {
-        free(roles[i]);
-        free(contents[i]);
-    }
-    free(roles);
-    free(contents);
-    free(line);
-    free(escaped);
-
+    *out_json = text;
     return ESP_OK;
+}
+
+static void claw_memory_append_recall_state_updates(const claw_memory_item_list_t *items)
+{
+    size_t i;
+
+    for (i = 0; items && i < items->count; i++) {
+        claw_memory_append_digest_line("recall", &items->items[i], "access_count+1");
+    }
 }
 
 esp_err_t claw_memory_init(const claw_memory_config_t *config)
 {
+    static const char *const default_markdown =
+        "# Long-term Memory\n\n"
+        "(empty - ESP-Claw will write memories here as it learns)\n";
+    static const char *const default_index =
+        "{\"version\":3,\"next_summary_id\":1,\"last_compact_digest_size\":0,\"summaries\":[],\"keyword_index\":{}}\n";
+
     if (!config || !config->session_root_dir || !config->long_term_memory_path) {
         return ESP_ERR_INVALID_ARG;
     }
 
     memset(&s_memory, 0, sizeof(s_memory));
     safe_copy(s_memory.session_root_dir, sizeof(s_memory.session_root_dir), config->session_root_dir);
-    safe_copy(s_memory.long_term_memory_path, sizeof(s_memory.long_term_memory_path), config->long_term_memory_path);
-    s_memory.max_session_messages = config->max_session_messages ? config->max_session_messages :
-                                    CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES;
-    s_memory.max_message_chars = config->max_message_chars ? config->max_message_chars :
-                                 CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS;
+    safe_copy(s_memory.long_term_memory_path,
+              sizeof(s_memory.long_term_memory_path),
+              config->long_term_memory_path);
+    derive_memory_root_from_markdown(config->long_term_memory_path,
+                                     s_memory.memory_root_dir,
+                                     sizeof(s_memory.memory_root_dir));
+    s_memory.max_session_messages = config->max_session_messages ?
+        config->max_session_messages : CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES;
+    s_memory.max_message_chars = config->max_message_chars ?
+        config->max_message_chars : CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS;
+    s_memory.next_memory_seq = claw_memory_now_sec() % 10000U;
 
-    if (ensure_dir(s_memory.session_root_dir) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create session root: %s", s_memory.session_root_dir);
+    if (claw_memory_join_path(s_memory.records_path,
+                              sizeof(s_memory.records_path),
+                              s_memory.memory_root_dir,
+                              CLAW_MEMORY_RECORDS_FILE) != ESP_OK ||
+        claw_memory_join_path(s_memory.index_path,
+                              sizeof(s_memory.index_path),
+                              s_memory.memory_root_dir,
+                              CLAW_MEMORY_INDEX_FILE) != ESP_OK ||
+        claw_memory_join_path(s_memory.digest_path,
+                              sizeof(s_memory.digest_path),
+                              s_memory.memory_root_dir,
+                              CLAW_MEMORY_DIGEST_FILE) != ESP_OK) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    if (ensure_dir_recursive(s_memory.session_root_dir) != ESP_OK ||
+        ensure_dir_recursive(s_memory.memory_root_dir) != ESP_OK) {
         return ESP_FAIL;
     }
-    if (ensure_parent_dir(s_memory.long_term_memory_path) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to prepare long-term memory path: %s", s_memory.long_term_memory_path);
+
+    if (claw_memory_profile_init_defaults() != ESP_OK) {
         return ESP_FAIL;
     }
-    if (ensure_long_term_memory_file(s_memory.long_term_memory_path) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to prepare long-term memory file: %s", s_memory.long_term_memory_path);
+
+    if (ensure_file_with_default(s_memory.records_path, "") != ESP_OK ||
+        ensure_file_with_default(s_memory.index_path, default_index) != ESP_OK ||
+        ensure_file_with_default(s_memory.digest_path, "") != ESP_OK ||
+        ensure_file_with_default(s_memory.long_term_memory_path, default_markdown) != ESP_OK) {
         return ESP_FAIL;
     }
 
     s_memory.initialized = 1;
-    ESP_LOGI(TAG, "Initialized");
+    {
+        esp_err_t async_err = claw_memory_async_extract_init(config);
+
+        if (async_err != ESP_OK) {
+            return async_err;
+        }
+    }
+    claw_memory_compact_internal(false);
+    ESP_LOGI(TAG, "Initialized memory root=%s", s_memory.memory_root_dir);
     return ESP_OK;
 }
 
-esp_err_t claw_memory_session_load(const char *session_id, char *buf, size_t size)
+esp_err_t claw_memory_store(const claw_memory_item_t *item)
 {
-    return claw_memory_session_load_json(session_id, buf, size);
-}
+    claw_memory_item_t *prepared = NULL;
+    esp_err_t err;
 
-esp_err_t claw_memory_session_append(const char *session_id,
-                                     const char *user_text,
-                                     const char *assistant_text)
-{
-    char *path = NULL;
-    FILE *file = NULL;
-    esp_err_t err = ESP_OK;
-
-    if (!s_memory.initialized || !session_id || !user_text || !assistant_text) {
+    if (!s_memory.initialized || !item) {
         return ESP_ERR_INVALID_STATE;
     }
-
-    path = session_path_dup(session_id);
-    if (!path) {
+    prepared = calloc(1, sizeof(*prepared));
+    if (!prepared) {
         return ESP_ERR_NO_MEM;
     }
-    file = fopen(path, "a");
-    if (!file) {
-        ESP_LOGE(TAG, "Failed to open session file: %s", path);
-        free(path);
-        return ESP_FAIL;
-    }
-
-    err = append_line(file, "user", user_text);
-    if (err == ESP_OK) {
-        err = append_line(file, "assistant", assistant_text);
-    }
-    fclose(file);
-    free(path);
+    *prepared = *item;
+    err = claw_memory_store_prepared_item(prepared, "store", NULL, NULL);
+    free(prepared);
     return err;
 }
 
-esp_err_t claw_memory_long_term_read(char *buf, size_t size)
+esp_err_t claw_memory_store_with_result(claw_memory_item_t *item, bool *out_changed)
 {
-    FILE *file = NULL;
-    size_t n;
-
-    if (!s_memory.initialized || !buf || size == 0) {
+    if (!s_memory.initialized || !item) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    file = fopen(s_memory.long_term_memory_path, "r");
-    if (!file) {
-        buf[0] = '\0';
+    return claw_memory_store_prepared_item(item, "store", NULL, out_changed);
+}
+
+esp_err_t claw_memory_recall(const claw_memory_query_t *query, char **out_json)
+{
+    claw_memory_item_list_t items = {0};
+    claw_memory_item_list_t matches = {0};
+    cJSON *index_root = NULL;
+    int summary_ids[CLAW_MEMORY_MAX_SUMMARIES] = {0};
+    size_t resolved_summary_count = 0;
+    size_t limit;
+    size_t i;
+    esp_err_t err;
+
+    if (!query || !out_json) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_memory.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    err = claw_memory_load_index(&index_root);
+    if (err != ESP_OK) {
+        return err;
+    }
+    for (i = 0; i < query->summary_label_count && i < CLAW_MEMORY_MAX_SUMMARIES; i++) {
+        cJSON *summary = claw_memory_find_summary_by_label(index_root, query->summary_labels[i]);
+        if (summary) {
+            summary_ids[resolved_summary_count++] =
+                cJSON_GetObjectItem(summary, "summary_id")->valueint;
+        }
+    }
+    if (query->summary_label_count > 0 && resolved_summary_count == 0) {
+        err = claw_memory_render_item_list_json(NULL, index_root, out_json);
+        cJSON_Delete(index_root);
+        return err;
+    }
+
+    err = claw_memory_load_current_items(&items);
+    if (err != ESP_OK) {
+        cJSON_Delete(index_root);
+        return err;
+    }
+
+    limit = query->limit ? query->limit : CLAW_MEMORY_RECALL_DEFAULT_LIMIT;
+    for (i = 0; i < items.count; i++) {
+        claw_memory_item_t item = items.items[i];
+
+        if (item.deleted) {
+            continue;
+        }
+        if (!claw_memory_item_matches_summary_ids(&item, summary_ids, resolved_summary_count)) {
+            continue;
+        }
+        if (claw_memory_item_list_push(&matches, &item) != ESP_OK) {
+            cJSON_Delete(index_root);
+            claw_memory_item_list_free(&items);
+            claw_memory_item_list_free(&matches);
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    if (matches.count > 1) {
+        qsort(matches.items, matches.count, sizeof(*matches.items), claw_memory_sort_by_priority_desc);
+    }
+    if (matches.count > limit) {
+        matches.count = limit;
+    }
+
+    err = claw_memory_render_item_list_json(&matches, index_root, out_json);
+    if (err == ESP_OK) {
+        claw_memory_append_recall_state_updates(&matches);
+    }
+
+    cJSON_Delete(index_root);
+    claw_memory_item_list_free(&items);
+    claw_memory_item_list_free(&matches);
+    return err;
+}
+
+esp_err_t claw_memory_update(const claw_memory_item_t *item)
+{
+    claw_memory_item_t *updated_item = NULL;
+    esp_err_t err;
+
+    if (!item) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    updated_item = calloc(1, sizeof(*updated_item));
+    if (!updated_item) {
+        return ESP_ERR_NO_MEM;
+    }
+    *updated_item = *item;
+    err = claw_memory_update_with_result(updated_item, NULL);
+    free(updated_item);
+    return err;
+}
+
+esp_err_t claw_memory_update_with_result(claw_memory_item_t *item, bool *out_changed)
+{
+    claw_memory_item_list_t items = {0};
+    claw_memory_item_t *replacement = NULL;
+    claw_memory_item_t *forgotten = NULL;
+    bool stored_changed = false;
+    bool forgotten_changed = false;
+    int idx;
+    esp_err_t err;
+
+    if (!item || !item->id[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_memory.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (out_changed) {
+        *out_changed = false;
+    }
+
+    replacement = calloc(1, sizeof(*replacement));
+    forgotten = calloc(1, sizeof(*forgotten));
+    if (!replacement || !forgotten) {
+        free(replacement);
+        free(forgotten);
+        return ESP_ERR_NO_MEM;
+    }
+
+    err = claw_memory_load_current_items(&items);
+    if (err != ESP_OK) {
+        free(replacement);
+        free(forgotten);
+        return err;
+    }
+    idx = claw_memory_find_item_index(&items, item->id);
+    if (idx < 0 || items.items[idx].deleted) {
+        claw_memory_item_list_free(&items);
+        free(replacement);
+        free(forgotten);
         return ESP_ERR_NOT_FOUND;
     }
 
-    n = fread(buf, 1, size - 1, file);
-    buf[n] = '\0';
-    fclose(file);
-    return ESP_OK;
+    err = claw_memory_prepare_updated_replacement(&items.items[idx], item, replacement);
+    if (err == ESP_OK &&
+        claw_memory_items_equivalent_for_update(&items.items[idx], replacement)) {
+        *item = items.items[idx];
+        claw_memory_item_list_free(&items);
+        free(replacement);
+        free(forgotten);
+        return ESP_OK;
+    }
+    claw_memory_item_list_free(&items);
+    if (err != ESP_OK) {
+        free(replacement);
+        free(forgotten);
+        return err;
+    }
+
+    err = claw_memory_store_prepared_item_internal(replacement,
+                                                   "update_store",
+                                                   item->id,
+                                                   item->id,
+                                                   &stored_changed);
+    if (err != ESP_OK) {
+        free(replacement);
+        free(forgotten);
+        return err;
+    }
+
+    err = claw_memory_forget_with_result(item->id, forgotten, &forgotten_changed);
+    if (err != ESP_OK) {
+        free(replacement);
+        free(forgotten);
+        return err;
+    }
+
+    claw_memory_append_digest_line("update", replacement, forgotten->id);
+    *item = *replacement;
+    if (out_changed) {
+        *out_changed = stored_changed || forgotten_changed;
+    }
+
+    err = claw_memory_maybe_compact();
+    free(replacement);
+    free(forgotten);
+    return err;
 }
 
-esp_err_t claw_memory_long_term_write(const char *content)
+esp_err_t claw_memory_forget(const char *memory_id)
 {
-    FILE *file = NULL;
+    return claw_memory_forget_with_result(memory_id, NULL, NULL);
+}
 
-    if (!s_memory.initialized || !content) {
+esp_err_t claw_memory_forget_with_result(const char *memory_id,
+                                         claw_memory_item_t *out_item,
+                                         bool *out_changed)
+{
+    claw_memory_item_list_t items = {0};
+    cJSON *index_root = NULL;
+    claw_memory_item_t *forgotten = NULL;
+    int idx;
+    esp_err_t err;
+
+    if (!memory_id || !memory_id[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_memory.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (out_changed) {
+        *out_changed = false;
+    }
+
+    forgotten = calloc(1, sizeof(*forgotten));
+    if (!forgotten) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    err = claw_memory_load_current_items(&items);
+    if (err != ESP_OK) {
+        free(forgotten);
+        return err;
+    }
+    idx = claw_memory_find_item_index(&items, memory_id);
+    if (idx < 0 || items.items[idx].deleted) {
+        claw_memory_item_list_free(&items);
+        free(forgotten);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    *forgotten = items.items[idx];
+    forgotten->deleted = 1;
+    forgotten->updated_at = claw_memory_now_sec();
+    if (out_item) {
+        *out_item = items.items[idx];
+    }
+
+    err = claw_memory_append_record(forgotten);
+    if (err != ESP_OK) {
+        claw_memory_item_list_free(&items);
+        free(forgotten);
+        return err;
+    }
+
+    err = claw_memory_load_index(&index_root);
+    if (err != ESP_OK) {
+        claw_memory_item_list_free(&items);
+        free(forgotten);
+        return err;
+    }
+
+    items.items[idx] = *forgotten;
+    claw_memory_adjust_summary_stats(index_root, forgotten, -1);
+    claw_memory_remove_unused_summaries(index_root);
+    claw_memory_rebuild_keyword_index(index_root, &items);
+    err = claw_memory_save_index(index_root);
+    if (err == ESP_OK) {
+        claw_memory_item_list_t active = {0};
+        size_t i;
+
+        for (i = 0; i < items.count; i++) {
+            if (!items.items[i].deleted) {
+                err = claw_memory_item_list_push(&active, &items.items[i]);
+                if (err != ESP_OK) {
+                    claw_memory_item_list_free(&active);
+                    cJSON_Delete(index_root);
+                    claw_memory_item_list_free(&items);
+                    free(forgotten);
+                    return err;
+                }
+            }
+        }
+        err = claw_memory_sync_markdown(&active, index_root);
+        claw_memory_item_list_free(&active);
+    }
+    if (err == ESP_OK) {
+        claw_memory_append_digest_line("forget", forgotten, NULL);
+        s_memory.write_changes_since_compact++;
+        if (out_changed) {
+            *out_changed = true;
+        }
+    }
+
+    cJSON_Delete(index_root);
+    claw_memory_item_list_free(&items);
+    if (err == ESP_OK) {
+        err = claw_memory_maybe_compact();
+    }
+    free(forgotten);
+    return err;
+}
+
+esp_err_t claw_memory_list(char **out_json)
+{
+    claw_memory_item_list_t items = {0};
+    claw_memory_item_list_t filtered = {0};
+    cJSON *index_root = NULL;
+    size_t i;
+    esp_err_t err;
+
+    if (!out_json) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_memory.initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    file = fopen(s_memory.long_term_memory_path, "w");
-    if (!file) {
-        return ESP_FAIL;
+    err = claw_memory_load_current_items(&items);
+    if (err != ESP_OK) {
+        return err;
     }
-    fputs(content, file);
-    fclose(file);
-    return ESP_OK;
-}
+    for (i = 0; i < items.count; i++) {
+        if (items.items[i].deleted) {
+            continue;
+        }
+        if (claw_memory_item_list_push(&filtered, &items.items[i]) != ESP_OK) {
+            claw_memory_item_list_free(&items);
+            claw_memory_item_list_free(&filtered);
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (filtered.count > 1) {
+        qsort(filtered.items, filtered.count, sizeof(*filtered.items), claw_memory_sort_by_priority_desc);
+    }
 
-esp_err_t claw_memory_append_session_turn_callback(const char *session_id,
-                                                   const char *user_text,
-                                                   const char *assistant_text,
-                                                   void *user_ctx)
-{
-    (void)user_ctx;
-    return claw_memory_session_append(session_id, user_text, assistant_text);
+    err = claw_memory_load_index(&index_root);
+    if (err == ESP_OK) {
+        err = claw_memory_render_item_list_json(&filtered, index_root, out_json);
+    }
+
+    cJSON_Delete(index_root);
+    claw_memory_item_list_free(&items);
+    claw_memory_item_list_free(&filtered);
+    return err;
 }
 
 static esp_err_t claw_memory_long_term_collect(const claw_core_request_t *request,
                                                claw_core_context_t *out_context,
                                                void *user_ctx)
 {
-    char *content = NULL;
+    cJSON *index_root = NULL;
+    cJSON *summaries;
+    cJSON *item;
+    size_t count = 0;
+    size_t buf_size;
+    size_t off = 0;
+    char *content;
     esp_err_t err;
 
     (void)request;
@@ -708,65 +715,60 @@ static esp_err_t claw_memory_long_term_collect(const claw_core_request_t *reques
         return ESP_ERR_INVALID_ARG;
     }
 
-    memset(out_context, 0, sizeof(*out_context));
-    err = read_file_dup(s_memory.long_term_memory_path, &content);
+    err = claw_memory_load_index(&index_root);
     if (err != ESP_OK) {
         return err;
     }
-    if (!content[0]) {
-        free(content);
-        return ESP_ERR_NOT_FOUND;
+
+    summaries = cJSON_GetObjectItem(index_root, "summaries");
+    if (cJSON_IsArray(summaries)) {
+        count = (size_t)cJSON_GetArraySize(summaries);
     }
 
-    out_context->kind = CLAW_CORE_CONTEXT_KIND_SYSTEM_PROMPT;
-    out_context->content = content;
-    return ESP_OK;
-}
-
-static esp_err_t claw_memory_session_history_collect(const claw_core_request_t *request,
-                                                     claw_core_context_t *out_context,
-                                                     void *user_ctx)
-{
-    char *content = NULL;
-    size_t content_size;
-    esp_err_t err;
-
-    (void)user_ctx;
-
-    if (!request || !out_context || !request->session_id || !request->session_id[0]) {
-        return ESP_ERR_NOT_FOUND;
-    }
-
-    memset(out_context, 0, sizeof(*out_context));
-    content_size = session_history_json_size();
-    content = calloc(1, content_size);
+    buf_size = 512 + (count * 64);
+    content = calloc(1, buf_size);
     if (!content) {
+        cJSON_Delete(index_root);
         return ESP_ERR_NO_MEM;
     }
 
-    err = claw_memory_session_load_json(request->session_id, content, content_size);
-    if (err != ESP_OK) {
-        free(content);
-        return err;
+    off += snprintf(content + off,
+                    buf_size - off,
+                    "The auto-injected long-term memory context only contains summary labels, not full memory bodies.\n"
+                    "Use exact summary labels with memory_recall when you need detailed long-term memory.\n"
+                    "Summary labels must be copied verbatim from the catalog below. Do not invent new labels.\n"
+                    "If the user asks what you remember about them, what they like or prefer, or asks you to verify a remembered fact, call memory_recall before answering when any relevant summary label is present.\n"
+                    "If the user asks you to forget a remembered item, first inspect memory_id with memory_recall or memory_list, then call memory_forget with that exact memory_id.\n"
+                    "If the user asks you to update a remembered item and any relevant summary label exists, first choose the most relevant summary labels from this catalog, call memory_recall to inspect the original memory bodies and memory_id values, then call memory_update with the selected memory_id.\n"
+                    "Do not rely on session history alone for those recall questions, because long-term memory may contain additional facts not visible in the recent chat.\n"
+                    "Do not treat /memory/MEMORY.md or raw memory files as the retrieval source of truth.\n"
+                    "Do not mention internal memory policy, storage behavior, auto-extraction, or whether you will or will not remember something unless the user explicitly asks about memory behavior.\n"
+                    "Summary label catalog:\n");
+    cJSON_ArrayForEach(item, summaries) {
+        const char *label = cJSON_GetStringValue(cJSON_GetObjectItem(item, "label"));
+
+        if (off + 32 >= buf_size) {
+            break;
+        }
+        if (!label) {
+            continue;
+        }
+        off += snprintf(content + off, buf_size - off, "- %s\n", label);
     }
-    if (!content[0] || strcmp(content, "[]") == 0) {
-        free(content);
-        return ESP_ERR_NOT_FOUND;
+    if (count == 0) {
+        off += snprintf(content + off, buf_size - off, "- (empty)\n");
     }
 
-    out_context->kind = CLAW_CORE_CONTEXT_KIND_MESSAGES;
+    memset(out_context, 0, sizeof(*out_context));
+    out_context->kind = CLAW_CORE_CONTEXT_KIND_SYSTEM_PROMPT;
     out_context->content = content;
+
+    cJSON_Delete(index_root);
     return ESP_OK;
 }
 
 const claw_core_context_provider_t claw_memory_long_term_provider = {
     .name = "Long-term Memory",
     .collect = claw_memory_long_term_collect,
-    .user_ctx = NULL,
-};
-
-const claw_core_context_provider_t claw_memory_session_history_provider = {
-    .name = "Session History",
-    .collect = claw_memory_session_history_collect,
     .user_ctx = NULL,
 };
