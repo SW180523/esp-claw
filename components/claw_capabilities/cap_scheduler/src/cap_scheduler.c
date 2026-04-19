@@ -29,6 +29,10 @@ static esp_err_t cap_scheduler_execute_add(const char *input_json,
                                            const claw_cap_call_context_t *ctx,
                                            char *output,
                                            size_t output_size);
+static esp_err_t cap_scheduler_execute_update(const char *input_json,
+                                              const claw_cap_call_context_t *ctx,
+                                              char *output,
+                                              size_t output_size);
 static esp_err_t cap_scheduler_execute_enable(const char *input_json,
                                               const claw_cap_call_context_t *ctx,
                                               char *output,
@@ -37,6 +41,10 @@ static esp_err_t cap_scheduler_execute_disable(const char *input_json,
                                                const claw_cap_call_context_t *ctx,
                                                char *output,
                                                size_t output_size);
+static esp_err_t cap_scheduler_execute_remove(const char *input_json,
+                                              const claw_cap_call_context_t *ctx,
+                                              char *output,
+                                              size_t output_size);
 static esp_err_t cap_scheduler_execute_pause(const char *input_json,
                                              const claw_cap_call_context_t *ctx,
                                              char *output,
@@ -85,6 +93,16 @@ static const claw_cap_descriptor_t s_scheduler_descriptors[] = {
         .execute = cap_scheduler_execute_add,
     },
     {
+        .id = "scheduler_update",
+        .name = "scheduler_update",
+        .family = "scheduler",
+        .description = "Update one scheduler entry from schedule_json string and return runtime state.",
+        .kind = CLAW_CAP_KIND_HYBRID,
+        .cap_flags = CLAW_CAP_FLAG_CALLABLE_BY_LLM,
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"schedule_json\":{\"type\":\"string\"}},\"required\":[\"schedule_json\"]}",
+        .execute = cap_scheduler_execute_update,
+    },
+    {
         .id = "scheduler_enable",
         .name = "scheduler_enable",
         .family = "scheduler",
@@ -103,6 +121,16 @@ static const claw_cap_descriptor_t s_scheduler_descriptors[] = {
         .cap_flags = CLAW_CAP_FLAG_CALLABLE_BY_LLM,
         .input_schema_json = "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}},\"required\":[\"id\"]}",
         .execute = cap_scheduler_execute_disable,
+    },
+    {
+        .id = "scheduler_remove",
+        .name = "scheduler_remove",
+        .family = "scheduler",
+        .description = "Remove one scheduler entry by id.",
+        .kind = CLAW_CAP_KIND_HYBRID,
+        .cap_flags = CLAW_CAP_FLAG_CALLABLE_BY_LLM,
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}},\"required\":[\"id\"]}",
+        .execute = cap_scheduler_execute_remove,
     },
     {
         .id = "scheduler_pause",
@@ -1256,6 +1284,40 @@ cleanup:
     return err;
 }
 
+static esp_err_t cap_scheduler_execute_update(const char *input_json,
+                                              const claw_cap_call_context_t *ctx,
+                                              char *output,
+                                              size_t output_size)
+{
+    cap_scheduler_item_t *item = NULL;
+    esp_err_t err;
+
+    (void)ctx;
+
+    item = calloc(1, sizeof(*item));
+    if (!item) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    err = cap_scheduler_parse_add_input(input_json, item);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "scheduler update input invalid: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    err = cap_scheduler_update(item);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "scheduler update failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    err = cap_scheduler_get_state_json(item->id, output, output_size);
+
+cleanup:
+    free(item);
+    return err;
+}
+
 static esp_err_t cap_scheduler_execute_enable(const char *input_json,
                                               const claw_cap_call_context_t *ctx,
                                               char *output,
@@ -1281,6 +1343,20 @@ static esp_err_t cap_scheduler_execute_disable(const char *input_json,
     ESP_RETURN_ON_ERROR(cap_scheduler_parse_id_input(input_json, id, sizeof(id)), TAG, "id required");
     ESP_RETURN_ON_ERROR(cap_scheduler_enable(id, false), TAG, "disable failed");
     snprintf(output, output_size, "{\"ok\":true,\"id\":\"%s\",\"enabled\":false}", id);
+    return ESP_OK;
+}
+
+static esp_err_t cap_scheduler_execute_remove(const char *input_json,
+                                              const claw_cap_call_context_t *ctx,
+                                              char *output,
+                                              size_t output_size)
+{
+    char id[CAP_SCHEDULER_ID_LEN] = {0};
+
+    (void)ctx;
+    ESP_RETURN_ON_ERROR(cap_scheduler_parse_id_input(input_json, id, sizeof(id)), TAG, "id required");
+    ESP_RETURN_ON_ERROR(cap_scheduler_remove(id), TAG, "remove failed");
+    snprintf(output, output_size, "{\"ok\":true,\"id\":\"%s\",\"removed\":true}", id);
     return ESP_OK;
 }
 

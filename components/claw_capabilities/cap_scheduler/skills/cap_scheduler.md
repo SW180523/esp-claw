@@ -5,6 +5,7 @@ Use this skill when the user needs to inspect or control timer-based schedule ru
 ## When to use
 - The user asks to list current schedules.
 - The user asks to add a new schedule.
+- The user asks to update or remove a schedule.
 - The user asks to pause, resume, enable, disable, trigger, or reload a schedule.
 - The user asks for a timer-based reminder, automation, periodic check, or timed agent wake-up.
 
@@ -12,6 +13,8 @@ Use this skill when the user needs to inspect or control timer-based schedule ru
 - `scheduler_list`: list all scheduler entries and runtime state.
 - `scheduler_get`: get one scheduler entry by id.
 - `scheduler_add`: add a new scheduler entry from `schedule_json` string.
+- `scheduler_update`: update an existing scheduler entry from `schedule_json` string.
+- `scheduler_remove`: remove one scheduler entry by id.
 - `scheduler_enable`: enable one scheduler entry by id.
 - `scheduler_disable`: disable one scheduler entry by id.
 - `scheduler_pause`: pause one scheduler entry by id.
@@ -19,7 +22,7 @@ Use this skill when the user needs to inspect or control timer-based schedule ru
 - `scheduler_trigger_now`: trigger one scheduler entry immediately.
 - `scheduler_reload`: reload scheduler definitions from disk.
 
-## `scheduler_add` input format
+## `scheduler_add` / `scheduler_update` input format
 - `schedule_json` is a JSON string, not an object.
 - Use a stable, unique `id`. `scheduler_add` fails if the id already exists.
 

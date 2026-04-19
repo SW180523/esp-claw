@@ -18,6 +18,8 @@ static struct {
     struct arg_lit *list;
     struct arg_lit *reload;
     struct arg_lit *add;
+    struct arg_lit *update;
+    struct arg_lit *remove;
     struct arg_lit *enable;
     struct arg_lit *disable;
     struct arg_lit *pause;
@@ -62,7 +64,7 @@ static esp_err_t scheduler_prepare_argv(int argc,
                                         char ***out_argv,
                                         char **out_joined_json)
 {
-    bool has_add = false;
+    bool has_json_op = false;
     int json_index = -1;
     char **normalized_argv = NULL;
 
@@ -75,14 +77,14 @@ static esp_err_t scheduler_prepare_argv(int argc,
     *out_joined_json = NULL;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--add") == 0) {
-            has_add = true;
+        if (strcmp(argv[i], "--add") == 0 || strcmp(argv[i], "--update") == 0) {
+            has_json_op = true;
         } else if (strcmp(argv[i], "--json") == 0 || strcmp(argv[i], "-j") == 0) {
             json_index = i;
         }
     }
 
-    if (!has_add || json_index < 0 || (json_index + 1) >= argc) {
+    if (!has_json_op || json_index < 0 || (json_index + 1) >= argc) {
         return ESP_OK;
     }
 
@@ -136,6 +138,7 @@ static int scheduler_func(int argc, char **argv)
 
     operation_count = scheduler_args.list->count + scheduler_args.reload->count +
                       scheduler_args.add->count +
+                      scheduler_args.update->count + scheduler_args.remove->count +
                       scheduler_args.enable->count + scheduler_args.disable->count +
                       scheduler_args.pause->count + scheduler_args.resume->count +
                       scheduler_args.trigger->count;
@@ -183,9 +186,9 @@ static int scheduler_func(int argc, char **argv)
         return 0;
     }
 
-    if (scheduler_args.add->count) {
+    if (scheduler_args.add->count || scheduler_args.update->count) {
         if (!scheduler_args.json->count) {
-            printf("'--json' is required for '--add'\n");
+            printf("'--json' is required for this operation\n");
             free(parse_argv == argv ? NULL : parse_argv);
             free(joined_json);
             return 1;
@@ -199,9 +202,15 @@ static int scheduler_func(int argc, char **argv)
             return 1;
         }
 
-        err = cap_scheduler_add(&item);
+        if (scheduler_args.add->count) {
+            err = cap_scheduler_add(&item);
+        } else {
+            err = cap_scheduler_update(&item);
+        }
         if (err != ESP_OK) {
-            printf("scheduler add failed: %s\n", esp_err_to_name(err));
+            printf("scheduler %s failed: %s\n",
+                   scheduler_args.add->count ? "add" : "update",
+                   esp_err_to_name(err));
             free(parse_argv == argv ? NULL : parse_argv);
             free(joined_json);
             return 1;
@@ -234,6 +243,20 @@ static int scheduler_func(int argc, char **argv)
         free(parse_argv == argv ? NULL : parse_argv);
         free(joined_json);
         return 1;
+    }
+
+    if (scheduler_args.remove->count) {
+        err = cap_scheduler_remove(scheduler_args.id->sval[0]);
+        if (err != ESP_OK) {
+            printf("scheduler remove failed: %s\n", esp_err_to_name(err));
+            free(parse_argv == argv ? NULL : parse_argv);
+            free(joined_json);
+            return 1;
+        }
+        printf("{\"ok\":true,\"id\":\"%s\",\"removed\":true}\n", scheduler_args.id->sval[0]);
+        free(parse_argv == argv ? NULL : parse_argv);
+        free(joined_json);
+        return 0;
     }
 
     if (scheduler_args.enable->count) {
@@ -282,6 +305,8 @@ void register_cap_scheduler(void)
     scheduler_args.list = arg_lit0("l", "list", "List scheduler entries");
     scheduler_args.reload = arg_lit0(NULL, "reload", "Reload scheduler definitions from disk");
     scheduler_args.add = arg_lit0(NULL, "add", "Add one scheduler entry from JSON");
+    scheduler_args.update = arg_lit0(NULL, "update", "Update one scheduler entry from JSON");
+    scheduler_args.remove = arg_lit0(NULL, "remove", "Remove one scheduler entry by id");
     scheduler_args.enable = arg_lit0(NULL, "enable", "Enable one scheduler entry");
     scheduler_args.disable = arg_lit0(NULL, "disable", "Disable one scheduler entry");
     scheduler_args.pause = arg_lit0(NULL, "pause", "Pause one scheduler entry");
@@ -289,7 +314,7 @@ void register_cap_scheduler(void)
     scheduler_args.trigger = arg_lit0(NULL, "trigger", "Trigger one scheduler entry now");
     scheduler_args.id = arg_str0("i", "id", "<id>", "Scheduler id");
     scheduler_args.json = arg_str0("j", "json", "<json>", "Scheduler item JSON");
-    scheduler_args.end = arg_end(12);
+    scheduler_args.end = arg_end(14);
 
     const esp_console_cmd_t scheduler_cmd = {
         .command = "scheduler",
@@ -298,6 +323,8 @@ void register_cap_scheduler(void)
                 " scheduler --list\n"
                 " scheduler --reload\n"
                 " scheduler --add --json '{\"id\":\"demo_interval\",\"kind\":\"interval\",\"interval_ms\":60000,\"text\":\"demo\"}'\n"
+                " scheduler --update --json '{\"id\":\"demo_interval\",\"kind\":\"interval\",\"interval_ms\":120000,\"text\":\"updated\"}'\n"
+                " scheduler --remove --id demo_interval\n"
                 " scheduler --enable --id hourly_ping\n"
                 " scheduler --pause --id hourly_ping\n"
                 " scheduler --trigger --id hourly_ping\n",
