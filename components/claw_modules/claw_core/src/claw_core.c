@@ -153,33 +153,6 @@ static esp_err_t append_tool_summary_line(char *summary,
     return ESP_OK;
 }
 
-static char *build_session_assistant_text(const char *tool_summary, const char *assistant_text)
-{
-    const char *body = assistant_text ? assistant_text : "";
-    size_t summary_len = tool_summary ? strlen(tool_summary) : 0;
-    size_t body_len = strlen(body);
-    size_t total_len;
-    char *combined;
-
-    if (summary_len == 0) {
-        return dup_string(body);
-    }
-
-    total_len = summary_len + (body_len ? 1 : 0) + body_len + 1;
-    combined = calloc(1, total_len);
-    if (!combined) {
-        return NULL;
-    }
-
-    memcpy(combined, tool_summary, summary_len);
-    if (body_len) {
-        combined[summary_len] = '\n';
-        memcpy(combined + summary_len + 1, body, body_len);
-    }
-
-    return combined;
-}
-
 #define CLAW_CORE_OBS_CSV_MAX 384
 
 static bool obs_csv_contains(const char *csv, const char *name)
@@ -1243,25 +1216,18 @@ static void claw_core_task(void *arg)
         }
 
         if (err == ESP_OK && response.view.text) {
-            char *session_assistant_text = NULL;
-
             response.view.status = CLAW_CORE_RESPONSE_STATUS_OK;
-            session_assistant_text = build_session_assistant_text(tool_summary, response.view.text);
-            if (!session_assistant_text) {
-                ESP_LOGW(TAG, "failed to build session assistant text");
-            }
             if (response.view.text[0] &&
                     s_core.append_session_turn &&
                     request.view.session_id && request.view.session_id[0]) {
                 err = s_core.append_session_turn(request.view.session_id,
                                                  request.view.user_text,
-                                                 session_assistant_text ? session_assistant_text : response.view.text,
+                                                 response.view.text,
                                                  s_core.append_session_turn_user_ctx);
                 if (err != ESP_OK) {
                     ESP_LOGW(TAG, "append_session_turn failed: %s", esp_err_to_name(err));
                 }
             }
-            free(session_assistant_text);
             if (s_core.completion_observer_count > 0) {
                 claw_core_completion_summary_t summary = {
                     .request_id = request.view.request_id,
