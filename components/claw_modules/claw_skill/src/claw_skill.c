@@ -29,7 +29,7 @@ typedef struct {
     claw_skill_deactivate_guard_t guard;
 } claw_skill_guard_entry_t;
 
-static claw_skill_guard_entry_t s_guards[CLAW_SKILL_MAX_GUARDS];
+static claw_skill_guard_entry_t *s_guards = NULL;
 static size_t s_guard_count;
 
 #ifdef CONFIG_CLAW_SKILL_DEBUG_LOG
@@ -58,7 +58,7 @@ typedef struct {
     size_t entry_count;
 } claw_skill_state_t;
 
-static claw_skill_state_t s_skill = {0};
+static claw_skill_state_t *s_skill = NULL;
 
 static bool string_array_contains(const char *const *items, size_t count, const char *value);
 static esp_err_t push_unique_string(char ***items, size_t *count, const char *value);
@@ -152,11 +152,23 @@ static void claw_skill_reset(void)
 {
     size_t i;
 
-    for (i = 0; i < s_skill.entry_count; i++) {
-        free_registry_entry(&s_skill.entries[i]);
+    if (!s_skill) {
+        free(s_guards);
+        s_guards = NULL;
+        s_guard_count = 0;
+        return;
     }
-    free(s_skill.entries);
-    memset(&s_skill, 0, sizeof(s_skill));
+
+    for (i = 0; i < s_skill->entry_count; i++) {
+        free_registry_entry(&s_skill->entries[i]);
+    }
+    free(s_skill->entries);
+    memset(s_skill, 0, sizeof(*s_skill));
+    free(s_skill);
+    s_skill = NULL;
+    free(s_guards);
+    s_guards = NULL;
+    s_guard_count = 0;
 }
 
 static bool is_markdown_skill_file(const char *name)
@@ -184,7 +196,11 @@ static bool skill_path_is_valid(const char *path)
 
 static char *build_skill_path_dup(const char *filename)
 {
-    return dup_printf("%s/%s", s_skill.skills_root_dir, filename);
+    if (!s_skill) {
+        return NULL;
+    }
+
+    return dup_printf("%s/%s", s_skill->skills_root_dir, filename);
 }
 
 static esp_err_t ensure_dir(const char *path)
@@ -245,7 +261,7 @@ static char *build_session_state_path_dup(const char *session_id)
     const unsigned char *p = (const unsigned char *)session_id;
     size_t len;
 
-    if (!session_id || !session_id[0] || !s_skill.session_state_root_dir[0]) {
+    if (!s_skill || !session_id || !session_id[0] || !s_skill->session_state_root_dir[0]) {
         return NULL;
     }
 
@@ -261,7 +277,7 @@ static char *build_session_state_path_dup(const char *session_id)
     }
 
     return dup_printf("%s/s_%s_%08" PRIx32 ".skills.json",
-                      s_skill.session_state_root_dir,
+                      s_skill->session_state_root_dir,
                       safe_session_id[0] ? safe_session_id : "default",
                       hash);
 }
@@ -434,13 +450,13 @@ static const claw_skill_registry_entry_t *claw_skill_find_entry(const char *skil
 {
     size_t i;
 
-    if (!skill_id || !skill_id[0]) {
+    if (!s_skill || !skill_id || !skill_id[0]) {
         return NULL;
     }
 
-    for (i = 0; i < s_skill.entry_count; i++) {
-        if (strcmp(s_skill.entries[i].id, skill_id) == 0) {
-            return &s_skill.entries[i];
+    for (i = 0; i < s_skill->entry_count; i++) {
+        if (strcmp(s_skill->entries[i].id, skill_id) == 0) {
+            return &s_skill->entries[i];
         }
     }
 
@@ -575,8 +591,8 @@ static esp_err_t load_registry_from_json(void)
     }
 
     entry_count = (size_t)cJSON_GetArraySize(skills);
-    if (entry_count == 0 || entry_count > s_skill.max_skill_files) {
-        ESP_LOGE(TAG, "bad skill count %u/%u", (unsigned)entry_count, (unsigned)s_skill.max_skill_files);
+    if (entry_count == 0 || entry_count > s_skill->max_skill_files) {
+        ESP_LOGE(TAG, "bad skill count %u/%u", (unsigned)entry_count, (unsigned)s_skill->max_skill_files);
         err = ESP_ERR_INVALID_ARG;
         goto cleanup;
     }
@@ -631,8 +647,8 @@ static esp_err_t load_registry_from_json(void)
         entry_index++;
     }
 
-    s_skill.entries = entries;
-    s_skill.entry_count = entry_count;
+    s_skill->entries = entries;
+    s_skill->entry_count = entry_count;
     entries = NULL;
 
 cleanup:
@@ -686,7 +702,7 @@ static esp_err_t load_active_skill_ids_from_disk(const char *session_id,
     *out_skill_ids = NULL;
     *out_skill_count = 0;
 
-    if (!s_skill.initialized || !session_id || !session_id[0]) {
+    if (!s_skill || !s_skill->initialized || !session_id || !session_id[0]) {
         ESP_LOGE(TAG, "load active: bad state");
         return ESP_ERR_INVALID_STATE;
     }
@@ -753,7 +769,7 @@ static esp_err_t save_active_skill_ids_to_disk(const char *session_id,
     esp_err_t err = ESP_OK;
     size_t i;
 
-    if (!s_skill.initialized || !session_id || !session_id[0]) {
+    if (!s_skill || !s_skill->initialized || !session_id || !session_id[0]) {
         ESP_LOGE(TAG, "save active: bad state");
         return ESP_ERR_INVALID_STATE;
     }
@@ -817,14 +833,14 @@ static esp_err_t claw_skill_render_skills_list(char *buf, size_t size)
     size_t i;
     size_t off = 0;
 
-    if (!s_skill.initialized || !buf || size == 0) {
+    if (!s_skill || !s_skill->initialized || !buf || size == 0) {
         return ESP_ERR_INVALID_STATE;
     }
 
     buf[0] = '\0';
     off += snprintf(buf + off, size - off, "Available skills:\n");
-    for (i = 0; i < s_skill.entry_count && off + 1 < size; i++) {
-        const claw_skill_registry_entry_t *entry = &s_skill.entries[i];
+    for (i = 0; i < s_skill->entry_count && off + 1 < size; i++) {
+        const claw_skill_registry_entry_t *entry = &s_skill->entries[i];
 
         off += snprintf(buf + off,
                         size - off,
@@ -844,7 +860,7 @@ static esp_err_t claw_skill_build_prompt_block(const char *const *skill_ids,
     size_t i;
     size_t off = 0;
 
-    if (!s_skill.initialized || !buf || size == 0) {
+    if (!s_skill || !s_skill->initialized || !buf || size == 0) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -858,12 +874,12 @@ static esp_err_t claw_skill_build_prompt_block(const char *const *skill_ids,
             return ESP_ERR_NOT_FOUND;
         }
 
-        content = calloc(1, s_skill.max_file_bytes + 1);
+        content = calloc(1, s_skill->max_file_bytes + 1);
         if (!content) {
             return ESP_ERR_NO_MEM;
         }
 
-        err = claw_skill_read_document(entry, content, s_skill.max_file_bytes + 1);
+        err = claw_skill_read_document(entry, content, s_skill->max_file_bytes + 1);
         if (err != ESP_OK) {
             free(content);
             return err;
@@ -891,16 +907,22 @@ esp_err_t claw_skill_init(const claw_skill_config_t *config)
     }
 
     claw_skill_reset();
-    safe_copy(s_skill.skills_root_dir, sizeof(s_skill.skills_root_dir), config->skills_root_dir);
-    safe_copy(s_skill.session_state_root_dir,
-              sizeof(s_skill.session_state_root_dir),
+    s_skill = calloc(1, sizeof(*s_skill));
+    s_guards = calloc(CLAW_SKILL_MAX_GUARDS, sizeof(*s_guards));
+    if (!s_skill || !s_guards) {
+        claw_skill_reset();
+        return ESP_ERR_NO_MEM;
+    }
+    safe_copy(s_skill->skills_root_dir, sizeof(s_skill->skills_root_dir), config->skills_root_dir);
+    safe_copy(s_skill->session_state_root_dir,
+              sizeof(s_skill->session_state_root_dir),
               config->session_state_root_dir);
-    s_skill.max_skill_files = config->max_skill_files ? config->max_skill_files : CLAW_SKILL_DEFAULT_MAX_FILES;
-    s_skill.max_file_bytes = config->max_file_bytes ? config->max_file_bytes : CLAW_SKILL_DEFAULT_MAX_BYTES;
+    s_skill->max_skill_files = config->max_skill_files ? config->max_skill_files : CLAW_SKILL_DEFAULT_MAX_FILES;
+    s_skill->max_file_bytes = config->max_file_bytes ? config->max_file_bytes : CLAW_SKILL_DEFAULT_MAX_BYTES;
 
-    err = ensure_dir(s_skill.session_state_root_dir);
+    err = ensure_dir(s_skill->session_state_root_dir);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "init dir %s: %s", s_skill.session_state_root_dir, esp_err_to_name(err));
+        ESP_LOGE(TAG, "init dir %s: %s", s_skill->session_state_root_dir, esp_err_to_name(err));
         claw_skill_reset();
         return err;
     }
@@ -912,8 +934,8 @@ esp_err_t claw_skill_init(const claw_skill_config_t *config)
         return err;
     }
 
-    s_skill.initialized = 1;
-    ESP_LOGI(TAG, "Initialized registry with %u skill(s)", (unsigned)s_skill.entry_count);
+    s_skill->initialized = 1;
+    ESP_LOGI(TAG, "Initialized registry with %u skill(s)", (unsigned)s_skill->entry_count);
     return ESP_OK;
 }
 
@@ -923,36 +945,36 @@ esp_err_t claw_skill_reload_registry(void)
     size_t old_count = 0;
     esp_err_t err;
 
-    if (!s_skill.initialized) {
+    if (!s_skill || !s_skill->initialized) {
         ESP_LOGE(TAG, "reload before init");
         return ESP_ERR_INVALID_STATE;
     }
 
-    old_entries = s_skill.entries;
-    old_count = s_skill.entry_count;
-    s_skill.entries = NULL;
-    s_skill.entry_count = 0;
+    old_entries = s_skill->entries;
+    old_count = s_skill->entry_count;
+    s_skill->entries = NULL;
+    s_skill->entry_count = 0;
 
     err = load_registry_from_json();
     if (err == ESP_OK) {
         free_registry_entries(old_entries, old_count);
-        ESP_LOGI(TAG, "Reloaded registry with %u skill(s)", (unsigned)s_skill.entry_count);
+        ESP_LOGI(TAG, "Reloaded registry with %u skill(s)", (unsigned)s_skill->entry_count);
         return ESP_OK;
     }
 
-    s_skill.entries = old_entries;
-    s_skill.entry_count = old_count;
+    s_skill->entries = old_entries;
+    s_skill->entry_count = old_count;
     ESP_LOGE(TAG, "reload registry: %s", esp_err_to_name(err));
     return err;
 }
 
 const char *claw_skill_get_skills_root_dir(void)
 {
-    if (!s_skill.initialized || !s_skill.skills_root_dir[0]) {
+    if (!s_skill || !s_skill->initialized || !s_skill->skills_root_dir[0]) {
         return NULL;
     }
 
-    return s_skill.skills_root_dir;
+    return s_skill->skills_root_dir;
 }
 
 esp_err_t claw_skill_read_skills_list(char *buf, size_t size)
@@ -1025,7 +1047,7 @@ esp_err_t claw_skill_activate_for_session(const char *session_id, const char *sk
     size_t active_count = 0;
     esp_err_t err;
 
-    if (!s_skill.initialized || !session_id || !session_id[0] || !skill_id || !skill_id[0]) {
+    if (!s_skill || !s_skill->initialized || !session_id || !session_id[0] || !skill_id || !skill_id[0]) {
         return ESP_ERR_INVALID_ARG;
     }
     if (!claw_skill_find_entry(skill_id)) {
@@ -1056,7 +1078,7 @@ esp_err_t claw_skill_deactivate_for_session(const char *session_id, const char *
     size_t i;
     esp_err_t err;
 
-    if (!s_skill.initialized || !session_id || !session_id[0] || !skill_id || !skill_id[0]) {
+    if (!s_skill || !s_skill->initialized || !session_id || !session_id[0] || !skill_id || !skill_id[0]) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -1087,7 +1109,7 @@ esp_err_t claw_skill_deactivate_for_session(const char *session_id, const char *
 
 esp_err_t claw_skill_clear_active_for_session(const char *session_id)
 {
-    if (!s_skill.initialized || !session_id || !session_id[0]) {
+    if (!s_skill || !s_skill->initialized || !session_id || !session_id[0]) {
         return ESP_ERR_INVALID_ARG;
     }
     return save_active_skill_ids_to_disk(session_id, NULL, 0);
@@ -1098,6 +1120,9 @@ esp_err_t claw_skill_register_deactivate_guard(const char *skill_id,
 {
     if (!skill_id || !skill_id[0] || !guard) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_guards) {
+        return ESP_ERR_INVALID_STATE;
     }
 
     for (size_t i = 0; i < s_guard_count; i++) {
@@ -1134,6 +1159,9 @@ esp_err_t claw_skill_check_deactivate_allowed(const char *session_id,
     if (!skill_id || !skill_id[0]) {
         return ESP_OK;
     }
+    if (!s_guards) {
+        return ESP_OK;
+    }
 
     for (size_t i = 0; i < s_guard_count; i++) {
         if (strcmp(s_guards[i].skill_id, skill_id) != 0) {
@@ -1160,14 +1188,14 @@ static esp_err_t claw_skill_skills_list_collect(const claw_core_request_t *reque
     (void)request;
     (void)user_ctx;
 
-    if (!out_context || !s_skill.initialized) {
+    if (!out_context || !s_skill || !s_skill->initialized) {
         return ESP_ERR_INVALID_ARG;
     }
 
     content_size = 64;
-    for (size_t i = 0; i < s_skill.entry_count; i++) {
-        content_size += strlen(s_skill.entries[i].id ? s_skill.entries[i].id : "");
-        content_size += strlen(s_skill.entries[i].summary ? s_skill.entries[i].summary : "");
+    for (size_t i = 0; i < s_skill->entry_count; i++) {
+        content_size += strlen(s_skill->entries[i].id ? s_skill->entries[i].id : "");
+        content_size += strlen(s_skill->entries[i].summary ? s_skill->entries[i].summary : "");
         content_size += 16;
     }
 
@@ -1217,7 +1245,7 @@ static esp_err_t claw_skill_active_docs_collect(const claw_core_request_t *reque
         return ESP_ERR_NOT_FOUND;
     }
 
-    content_size = (active_skill_count * (s_skill.max_file_bytes + 128)) + 1;
+    content_size = (active_skill_count * (s_skill->max_file_bytes + 128)) + 1;
     content = calloc(1, content_size);
     if (!content) {
         free_string_array(active_skill_ids, active_skill_count);

@@ -96,7 +96,7 @@ typedef struct {
     size_t completion_observer_count;
 } claw_core_state_t;
 
-static claw_core_state_t s_core = {0};
+static claw_core_state_t *s_core = NULL;
 
 static char *dup_string(const char *src)
 {
@@ -238,14 +238,48 @@ static void free_context_provider_storage(void)
 {
     size_t i;
 
-    for (i = 0; i < s_core.context_provider_count; i++) {
-        free((char *)s_core.context_providers[i].name);
-        s_core.context_providers[i].name = NULL;
+    if (!s_core) {
+        return;
     }
-    free(s_core.context_providers);
-    s_core.context_providers = NULL;
-    s_core.context_provider_count = 0;
-    s_core.context_provider_capacity = 0;
+
+    for (i = 0; i < s_core->context_provider_count; i++) {
+        free((char *)s_core->context_providers[i].name);
+        s_core->context_providers[i].name = NULL;
+    }
+    free(s_core->context_providers);
+    s_core->context_providers = NULL;
+    s_core->context_provider_count = 0;
+    s_core->context_provider_capacity = 0;
+}
+
+static void claw_core_free_state_storage(void)
+{
+    free(s_core);
+    s_core = NULL;
+}
+
+static void claw_core_reset_runtime(void)
+{
+    if (!s_core) {
+        return;
+    }
+
+    free_context_provider_storage();
+    free(s_core->system_prompt);
+    if (s_core->request_queue) {
+        vQueueDelete(s_core->request_queue);
+    }
+    if (s_core->response_queue) {
+        vQueueDelete(s_core->response_queue);
+    }
+    if (s_core->response_lock) {
+        vSemaphoreDelete(s_core->response_lock);
+    }
+    if (s_core->inflight_lock) {
+        vSemaphoreDelete(s_core->inflight_lock);
+    }
+    memset(s_core, 0, sizeof(*s_core));
+    claw_core_free_state_storage();
 }
 
 static void free_request_item(claw_core_request_item_t *item)
@@ -281,7 +315,7 @@ static void free_response_item(claw_core_response_item_t *item)
 
 static esp_err_t push_response(claw_core_response_item_t *item)
 {
-    if (xQueueSend(s_core.response_queue, item, portMAX_DELAY) != pdTRUE) {
+    if (xQueueSend(s_core->response_queue, item, portMAX_DELAY) != pdTRUE) {
         return ESP_FAIL;
     }
 
@@ -301,12 +335,12 @@ static esp_err_t enqueue_pending_response(claw_core_response_item_t *item)
     }
 
     node->item = *item;
-    if (!s_core.pending_tail) {
-        s_core.pending_head = node;
+    if (!s_core->pending_tail) {
+        s_core->pending_head = node;
     } else {
-        s_core.pending_tail->next = node;
+        s_core->pending_tail->next = node;
     }
-    s_core.pending_tail = node;
+    s_core->pending_tail = node;
     memset(item, 0, sizeof(*item));
     return ESP_OK;
 }
@@ -316,17 +350,17 @@ static bool pop_pending_response(uint32_t request_id,
                                  claw_core_response_item_t *out_item)
 {
     claw_core_pending_response_t *prev = NULL;
-    claw_core_pending_response_t *cur = s_core.pending_head;
+    claw_core_pending_response_t *cur = s_core->pending_head;
 
     while (cur) {
         if (match_any || cur->item.view.request_id == request_id) {
             if (prev) {
                 prev->next = cur->next;
             } else {
-                s_core.pending_head = cur->next;
+                s_core->pending_head = cur->next;
             }
-            if (s_core.pending_tail == cur) {
-                s_core.pending_tail = prev;
+            if (s_core->pending_tail == cur) {
+                s_core->pending_tail = prev;
             }
             *out_item = cur->item;
             free(cur);
@@ -608,11 +642,11 @@ static void publish_stage_note_for_round(const claw_core_request_t *request,
     char *stage_note = NULL;
     esp_err_t err;
 
-    if (!s_core.collect_stage_note) {
+    if (!s_core->collect_stage_note) {
         return;
     }
 
-    err = s_core.collect_stage_note(request, &stage_note, s_core.collect_stage_note_user_ctx);
+    err = s_core->collect_stage_note(request, &stage_note, s_core->collect_stage_note_user_ctx);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "stage_note callback failed: %s", esp_err_to_name(err));
         free(stage_note);
@@ -976,7 +1010,7 @@ static esp_err_t build_iteration_context(const claw_core_request_item_t *request
     *out_messages = NULL;
     *out_tools_json = NULL;
 
-    system_prompt = dup_string(s_core.system_prompt);
+    system_prompt = dup_string(s_core->system_prompt);
     messages = cJSON_CreateArray();
     tools = cJSON_CreateArray();
     if (!system_prompt || !messages || !tools) {
@@ -984,9 +1018,9 @@ static esp_err_t build_iteration_context(const claw_core_request_item_t *request
         goto cleanup;
     }
 
-    for (i = 0; i < s_core.context_provider_count; i++) {
+    for (i = 0; i < s_core->context_provider_count; i++) {
         claw_core_context_t context = {0};
-        const claw_core_context_provider_t *provider = &s_core.context_providers[i];
+        const claw_core_context_provider_t *provider = &s_core->context_providers[i];
         size_t context_len;
 
         err = provider->collect(&request->view, &context, provider->user_ctx);
@@ -1107,16 +1141,16 @@ static void claw_core_task(void *arg)
         char obs_providers_csv[CLAW_CORE_OBS_CSV_MAX] = {0};
         char obs_tool_calls_csv[CLAW_CORE_OBS_CSV_MAX] = {0};
 
-        if (xQueueReceive(s_core.request_queue, &request, portMAX_DELAY) != pdTRUE) {
+        if (xQueueReceive(s_core->request_queue, &request, portMAX_DELAY) != pdTRUE) {
             continue;
         }
 
-        if (xSemaphoreTake(s_core.inflight_lock, portMAX_DELAY) == pdTRUE) {
-            s_core.inflight_request_id = request.view.request_id;
-            s_core.inflight_abort = false;
-            xSemaphoreGive(s_core.inflight_lock);
+        if (xSemaphoreTake(s_core->inflight_lock, portMAX_DELAY) == pdTRUE) {
+            s_core->inflight_request_id = request.view.request_id;
+            s_core->inflight_abort = false;
+            xSemaphoreGive(s_core->inflight_lock);
         }
-        claw_llm_http_arm_abort(&s_core.inflight_abort);
+        claw_llm_http_arm_abort(&s_core->inflight_abort);
 
         response.view.request_id = request.view.request_id;
         response.view.status = CLAW_CORE_RESPONSE_STATUS_ERROR;
@@ -1130,8 +1164,8 @@ static void claw_core_task(void *arg)
             response.view.error_message = dup_string("Failed to allocate response target");
             goto finish_request;
         }
-        if (s_core.on_request_start) {
-            err = s_core.on_request_start(&request.view, s_core.on_request_start_user_ctx);
+        if (s_core->on_request_start) {
+            err = s_core->on_request_start(&request.view, s_core->on_request_start_user_ctx);
             if (err != ESP_OK) {
                 ESP_LOGW(TAG,
                          "request_start request=%" PRIu32 " failed: %s",
@@ -1211,7 +1245,7 @@ static void claw_core_task(void *arg)
             }
 
             iteration++;
-            if (iteration >= s_core.max_tool_iterations) {
+            if (iteration >= s_core->max_tool_iterations) {
                 response.view.error_message = dup_string("cap tool iteration limit reached");
                 err = ESP_ERR_INVALID_STATE;
                 goto finish_request;
@@ -1221,17 +1255,17 @@ static void claw_core_task(void *arg)
         if (err == ESP_OK && response.view.text) {
             response.view.status = CLAW_CORE_RESPONSE_STATUS_OK;
             if (response.view.text[0] &&
-                    s_core.append_session_turn &&
+                    s_core->append_session_turn &&
                     request.view.session_id && request.view.session_id[0]) {
-                err = s_core.append_session_turn(request.view.session_id,
+                err = s_core->append_session_turn(request.view.session_id,
                                                  request.view.user_text,
                                                  response.view.text,
-                                                 s_core.append_session_turn_user_ctx);
+                                                 s_core->append_session_turn_user_ctx);
                 if (err != ESP_OK) {
                     ESP_LOGW(TAG, "append_session_turn failed: %s", esp_err_to_name(err));
                 }
             }
-            if (s_core.completion_observer_count > 0) {
+            if (s_core->completion_observer_count > 0) {
                 claw_core_completion_summary_t summary = {
                     .request_id = request.view.request_id,
                     .session_id = request.view.session_id,
@@ -1239,9 +1273,9 @@ static void claw_core_task(void *arg)
                     .context_providers_csv = obs_providers_csv,
                     .tool_calls_csv = obs_tool_calls_csv,
                 };
-                for (size_t i = 0; i < s_core.completion_observer_count; i++) {
-                    s_core.completion_observers[i].fn(&summary,
-                                                     s_core.completion_observers[i].user_ctx);
+                for (size_t i = 0; i < s_core->completion_observer_count; i++) {
+                    s_core->completion_observers[i].fn(&summary,
+                                                     s_core->completion_observers[i].user_ctx);
                 }
             }
         } else if (!response.view.error_message) {
@@ -1250,11 +1284,11 @@ static void claw_core_task(void *arg)
 
 finish_request:
         claw_llm_http_disarm_abort();
-        if (xSemaphoreTake(s_core.inflight_lock, portMAX_DELAY) == pdTRUE) {
-            bool was_cancelled = s_core.inflight_abort;
-            s_core.inflight_request_id = 0;
-            s_core.inflight_abort = false;
-            xSemaphoreGive(s_core.inflight_lock);
+        if (xSemaphoreTake(s_core->inflight_lock, portMAX_DELAY) == pdTRUE) {
+            bool was_cancelled = s_core->inflight_abort;
+            s_core->inflight_request_id = 0;
+            s_core->inflight_abort = false;
+            xSemaphoreGive(s_core->inflight_lock);
             if (was_cancelled && err != ESP_OK && response.view.error_message) {
                 /* Replace the generic transport error with a clearer one. */
                 free(response.view.error_message);
@@ -1296,66 +1330,69 @@ esp_err_t claw_core_init(const claw_core_config_t *config)
             (!(config->profile && config->profile[0]) && !(config->provider && config->provider[0]))) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (s_core.initialized) {
+    if (s_core && s_core->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    memset(&s_core, 0, sizeof(s_core));
-    claw_core_check_timezone();
-
-    s_core.system_prompt = dup_string(config->system_prompt);
-    if (!s_core.system_prompt) {
+    s_core = calloc(1, sizeof(*s_core));
+    if (!s_core) {
         return ESP_ERR_NO_MEM;
     }
-    s_core.append_session_turn = config->append_session_turn;
-    s_core.append_session_turn_user_ctx = config->append_session_turn_user_ctx;
-    s_core.on_request_start = config->on_request_start;
-    s_core.on_request_start_user_ctx = config->on_request_start_user_ctx;
-    s_core.collect_stage_note = config->collect_stage_note;
-    s_core.collect_stage_note_user_ctx = config->collect_stage_note_user_ctx;
-    s_core.call_cap = config->call_cap;
-    s_core.cap_user_ctx = config->cap_user_ctx;
+    claw_core_check_timezone();
+
+    s_core->system_prompt = dup_string(config->system_prompt);
+    if (!s_core->system_prompt) {
+        claw_core_free_state_storage();
+        return ESP_ERR_NO_MEM;
+    }
+    s_core->append_session_turn = config->append_session_turn;
+    s_core->append_session_turn_user_ctx = config->append_session_turn_user_ctx;
+    s_core->on_request_start = config->on_request_start;
+    s_core->on_request_start_user_ctx = config->on_request_start_user_ctx;
+    s_core->collect_stage_note = config->collect_stage_note;
+    s_core->collect_stage_note_user_ctx = config->collect_stage_note_user_ctx;
+    s_core->call_cap = config->call_cap;
+    s_core->cap_user_ctx = config->cap_user_ctx;
 
     request_queue_len = config->request_queue_len ? config->request_queue_len : CLAW_CORE_DEFAULT_REQUEST_Q;
     response_queue_len = config->response_queue_len ? config->response_queue_len : CLAW_CORE_DEFAULT_RESPONSE_Q;
-    s_core.task_stack_size = config->task_stack_size ? config->task_stack_size : CLAW_CORE_DEFAULT_STACK_SIZE;
-    s_core.task_priority = config->task_priority ? config->task_priority : CLAW_CORE_DEFAULT_PRIORITY;
-    s_core.task_core = config->task_core;
-    s_core.max_tool_iterations = config->max_tool_iterations ?
+    s_core->task_stack_size = config->task_stack_size ? config->task_stack_size : CLAW_CORE_DEFAULT_STACK_SIZE;
+    s_core->task_priority = config->task_priority ? config->task_priority : CLAW_CORE_DEFAULT_PRIORITY;
+    s_core->task_core = config->task_core;
+    s_core->max_tool_iterations = config->max_tool_iterations ?
                                  config->max_tool_iterations : CLAW_CORE_DEFAULT_TOOL_ITERATIONS;
-    s_core.context_provider_capacity = config->max_context_providers;
+    s_core->context_provider_capacity = config->max_context_providers;
 
-    if (s_core.context_provider_capacity > 0) {
-        s_core.context_providers = calloc(s_core.context_provider_capacity,
-                                          sizeof(claw_core_context_provider_t));
-        if (!s_core.context_providers) {
-            free(s_core.system_prompt);
-            memset(&s_core, 0, sizeof(s_core));
+    if (s_core->context_provider_capacity > 0) {
+        s_core->context_providers = calloc(s_core->context_provider_capacity,
+                                           sizeof(claw_core_context_provider_t));
+        if (!s_core->context_providers) {
+            claw_core_reset_runtime();
             return ESP_ERR_NO_MEM;
         }
     }
 
-    s_core.request_queue = xQueueCreate(request_queue_len, sizeof(claw_core_request_item_t));
-    s_core.response_queue = xQueueCreate(response_queue_len, sizeof(claw_core_response_item_t));
-    s_core.response_lock = xSemaphoreCreateMutex();
-    s_core.inflight_lock = xSemaphoreCreateMutex();
-    if (!s_core.request_queue || !s_core.response_queue ||
-            !s_core.response_lock || !s_core.inflight_lock) {
+    s_core->request_queue = xQueueCreate(request_queue_len, sizeof(claw_core_request_item_t));
+    s_core->response_queue = xQueueCreate(response_queue_len, sizeof(claw_core_response_item_t));
+    s_core->response_lock = xSemaphoreCreateMutex();
+    s_core->inflight_lock = xSemaphoreCreateMutex();
+    if (!s_core->request_queue || !s_core->response_queue ||
+            !s_core->response_lock || !s_core->inflight_lock) {
         free_context_provider_storage();
-        free(s_core.system_prompt);
-        if (s_core.request_queue) {
-            vQueueDelete(s_core.request_queue);
+        free(s_core->system_prompt);
+        if (s_core->request_queue) {
+            vQueueDelete(s_core->request_queue);
         }
-        if (s_core.response_queue) {
-            vQueueDelete(s_core.response_queue);
+        if (s_core->response_queue) {
+            vQueueDelete(s_core->response_queue);
         }
-        if (s_core.response_lock) {
-            vSemaphoreDelete(s_core.response_lock);
+        if (s_core->response_lock) {
+            vSemaphoreDelete(s_core->response_lock);
         }
-        if (s_core.inflight_lock) {
-            vSemaphoreDelete(s_core.inflight_lock);
+        if (s_core->inflight_lock) {
+            vSemaphoreDelete(s_core->inflight_lock);
         }
-        memset(&s_core, 0, sizeof(s_core));
+        claw_core_free_state_storage();
         return ESP_ERR_NO_MEM;
     }
 
@@ -1372,17 +1409,11 @@ esp_err_t claw_core_init(const claw_core_config_t *config)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "LLM init failed: %s", llm_error ? llm_error : esp_err_to_name(err));
         free(llm_error);
-        free_context_provider_storage();
-        free(s_core.system_prompt);
-        vQueueDelete(s_core.request_queue);
-        vQueueDelete(s_core.response_queue);
-        vSemaphoreDelete(s_core.response_lock);
-        vSemaphoreDelete(s_core.inflight_lock);
-        memset(&s_core, 0, sizeof(s_core));
+        claw_core_reset_runtime();
         return err;
     }
 
-    s_core.initialized = true;
+    s_core->initialized = true;
     ESP_LOGI(TAG, "Initialized");
     return ESP_OK;
 }
@@ -1391,29 +1422,29 @@ esp_err_t claw_core_start(void)
 {
     BaseType_t task_result;
 
-    if (!s_core.initialized) {
+    if (!s_core || !s_core->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (s_core.started) {
+    if (s_core->started) {
         return ESP_OK;
     }
 
     task_result = claw_task_create(&(claw_task_config_t){
                                         .name = "claw_core",
-                                        .stack_size = s_core.task_stack_size,
-                                        .priority = s_core.task_priority,
-                                        .core_id = s_core.task_core,
+                                        .stack_size = s_core->task_stack_size,
+                                        .priority = s_core->task_priority,
+                                        .core_id = s_core->task_core,
                                         .stack_policy = CLAW_TASK_STACK_PREFER_PSRAM,
                                     },
                                     claw_core_task,
                                     NULL,
-                                    &s_core.task_handle);
+                                    &s_core->task_handle);
 
     if (task_result != pdPASS) {
         return ESP_FAIL;
     }
 
-    s_core.started = true;
+    s_core->started = true;
     ESP_LOGI(TAG, "Started worker task");
     return ESP_OK;
 }
@@ -1422,42 +1453,42 @@ esp_err_t claw_core_add_context_provider(const claw_core_context_provider_t *pro
 {
     claw_core_context_provider_t *slot = NULL;
 
-    if (!s_core.initialized || s_core.started) {
+    if (!s_core || !s_core->initialized || s_core->started) {
         return ESP_ERR_INVALID_STATE;
     }
     if (!provider || !provider->name || !provider->collect) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (s_core.context_provider_count >= s_core.context_provider_capacity) {
+    if (s_core->context_provider_count >= s_core->context_provider_capacity) {
         return ESP_ERR_NO_MEM;
     }
 
-    slot = &s_core.context_providers[s_core.context_provider_count];
+    slot = &s_core->context_providers[s_core->context_provider_count];
     slot->name = dup_string(provider->name);
     if (!slot->name) {
         return ESP_ERR_NO_MEM;
     }
     slot->collect = provider->collect;
     slot->user_ctx = provider->user_ctx;
-    s_core.context_provider_count++;
+    s_core->context_provider_count++;
     return ESP_OK;
 }
 
 esp_err_t claw_core_add_completion_observer(claw_core_completion_observer_fn observer,
                                             void *user_ctx)
 {
-    if (!s_core.initialized) {
+    if (!s_core || !s_core->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
     if (!observer) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (s_core.completion_observer_count >= CLAW_CORE_MAX_COMPLETION_OBSERVERS) {
+    if (s_core->completion_observer_count >= CLAW_CORE_MAX_COMPLETION_OBSERVERS) {
         return ESP_ERR_NO_MEM;
     }
-    s_core.completion_observers[s_core.completion_observer_count].fn = observer;
-    s_core.completion_observers[s_core.completion_observer_count].user_ctx = user_ctx;
-    s_core.completion_observer_count++;
+    s_core->completion_observers[s_core->completion_observer_count].fn = observer;
+    s_core->completion_observers[s_core->completion_observer_count].user_ctx = user_ctx;
+    s_core->completion_observer_count++;
     return ESP_OK;
 }
 
@@ -1466,35 +1497,35 @@ esp_err_t claw_core_call_cap(const char *cap_name,
                              const claw_core_request_t *request,
                              char **out_output)
 {
-    if (!s_core.initialized || !s_core.call_cap) {
+    if (!s_core || !s_core->initialized || !s_core->call_cap) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    return s_core.call_cap(cap_name,
+    return s_core->call_cap(cap_name,
                            input_json,
                            request,
                            out_output,
-                           s_core.cap_user_ctx);
+                           s_core->cap_user_ctx);
 }
 
 esp_err_t claw_core_cancel_request(uint32_t request_id)
 {
     bool armed = false;
 
-    if (!s_core.initialized) {
+    if (!s_core || !s_core->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (xSemaphoreTake(s_core.inflight_lock, pdMS_TO_TICKS(200)) != pdTRUE) {
+    if (xSemaphoreTake(s_core->inflight_lock, pdMS_TO_TICKS(200)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
-    if (s_core.inflight_request_id != 0 &&
-            (request_id == 0 || s_core.inflight_request_id == request_id)) {
-        s_core.inflight_abort = true;
+    if (s_core->inflight_request_id != 0 &&
+            (request_id == 0 || s_core->inflight_request_id == request_id)) {
+        s_core->inflight_abort = true;
         armed = true;
         ESP_LOGI(TAG, "Cancel armed for in-flight request=%" PRIu32,
-                 s_core.inflight_request_id);
+                 s_core->inflight_request_id);
     }
-    xSemaphoreGive(s_core.inflight_lock);
+    xSemaphoreGive(s_core->inflight_lock);
     return armed ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
@@ -1503,8 +1534,8 @@ esp_err_t claw_core_submit(const claw_core_request_t *request, uint32_t timeout_
     claw_core_request_item_t item = {0};
     TickType_t ticks;
 
-    if (!s_core.started || !request || !request->user_text || request->user_text[0] == '\0') {
-        return s_core.started ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_STATE;
+    if (!s_core || !s_core->started || !request || !request->user_text || request->user_text[0] == '\0') {
+        return (s_core && s_core->started) ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_STATE;
     }
 
     item.view.request_id = request->request_id;
@@ -1543,7 +1574,7 @@ esp_err_t claw_core_submit(const claw_core_request_t *request, uint32_t timeout_
     }
 
     ticks = (timeout_ms == UINT32_MAX) ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
-    if (xQueueSend(s_core.request_queue, &item, ticks) != pdTRUE) {
+    if (xQueueSend(s_core->request_queue, &item, ticks) != pdTRUE) {
         free_request_item(&item);
         return ESP_ERR_TIMEOUT;
     }
@@ -1564,18 +1595,18 @@ esp_err_t claw_core_receive_for(uint32_t request_id,
     TickType_t start_ticks;
     bool match_any;
 
-    if (!s_core.started || !response) {
-        return s_core.started ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_STATE;
+    if (!s_core || !s_core->started || !response) {
+        return (s_core && s_core->started) ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTake(s_core.response_lock, portMAX_DELAY) != pdTRUE) {
+    if (xSemaphoreTake(s_core->response_lock, portMAX_DELAY) != pdTRUE) {
         return ESP_FAIL;
     }
     start_ticks = xTaskGetTickCount();
     match_any = (request_id == 0);
 
     if (pop_pending_response(request_id, match_any, &item)) {
-        xSemaphoreGive(s_core.response_lock);
+        xSemaphoreGive(s_core->response_lock);
         move_response_item(response, &item);
         return ESP_OK;
     }
@@ -1590,19 +1621,19 @@ esp_err_t claw_core_receive_for(uint32_t request_id,
             TickType_t timeout_ticks = pdMS_TO_TICKS(timeout_ms);
 
             if (elapsed >= timeout_ticks) {
-                xSemaphoreGive(s_core.response_lock);
+                xSemaphoreGive(s_core->response_lock);
                 return ESP_ERR_TIMEOUT;
             }
             wait_ticks = timeout_ticks - elapsed;
         }
 
-        if (xQueueReceive(s_core.response_queue, &item, wait_ticks) != pdTRUE) {
-            xSemaphoreGive(s_core.response_lock);
+        if (xQueueReceive(s_core->response_queue, &item, wait_ticks) != pdTRUE) {
+            xSemaphoreGive(s_core->response_lock);
             return ESP_ERR_TIMEOUT;
         }
 
         if (match_any || item.view.request_id == request_id) {
-            xSemaphoreGive(s_core.response_lock);
+            xSemaphoreGive(s_core->response_lock);
             move_response_item(response, &item);
             return ESP_OK;
         }

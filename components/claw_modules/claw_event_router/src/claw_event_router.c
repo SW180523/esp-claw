@@ -82,12 +82,7 @@ typedef struct {
     size_t pending_dropped;
 } claw_event_router_runtime_t;
 
-static claw_event_router_runtime_t s_runtime = {
-    .max_rules = CLAW_EVENT_ROUTER_DEFAULT_MAX_RULES,
-    .max_actions_per_rule = CLAW_EVENT_ROUTER_DEFAULT_MAX_ACTIONS,
-    .cap_output_size = CLAW_EVENT_ROUTER_DEFAULT_OUTPUT_SIZE,
-    .next_request_id = 1000000,
-};
+static claw_event_router_runtime_t *s_runtime = NULL;
 
 static cJSON *claw_event_router_rule_to_json(const claw_event_router_rule_t *rule);
 static esp_err_t claw_event_router_load_rules_from_file(const char *path,
@@ -98,6 +93,36 @@ static esp_err_t claw_event_router_write_rules_json_file(const char *path, const
 static esp_err_t claw_event_router_commit_rules(cJSON *root,
                                                 claw_event_router_rule_t *new_rules,
                                                 size_t new_rule_count);
+static void claw_event_router_free_rules(claw_event_router_rule_t *rules, size_t rule_count);
+
+static void claw_event_router_init_defaults(claw_event_router_runtime_t *runtime)
+{
+    if (!runtime) {
+        return;
+    }
+
+    runtime->max_rules = CLAW_EVENT_ROUTER_DEFAULT_MAX_RULES;
+    runtime->max_actions_per_rule = CLAW_EVENT_ROUTER_DEFAULT_MAX_ACTIONS;
+    runtime->cap_output_size = CLAW_EVENT_ROUTER_DEFAULT_OUTPUT_SIZE;
+    runtime->next_request_id = 1000000;
+}
+
+static void claw_event_router_free_runtime(void)
+{
+    if (!s_runtime) {
+        return;
+    }
+
+    claw_event_router_free_rules(s_runtime->rules, s_runtime->rule_count);
+    if (s_runtime->event_queue) {
+        vQueueDelete(s_runtime->event_queue);
+    }
+    if (s_runtime->mutex) {
+        vSemaphoreDelete(s_runtime->mutex);
+    }
+    free(s_runtime);
+    s_runtime = NULL;
+}
 
 static const char *claw_event_router_skip_space(const char *value)
 {
@@ -223,12 +248,12 @@ static int64_t claw_event_router_now_ms(void)
 
 static void claw_event_router_lock(void)
 {
-    xSemaphoreTakeRecursive(s_runtime.mutex, portMAX_DELAY);
+    xSemaphoreTakeRecursive(s_runtime->mutex, portMAX_DELAY);
 }
 
 static void claw_event_router_unlock(void)
 {
-    xSemaphoreGiveRecursive(s_runtime.mutex);
+    xSemaphoreGiveRecursive(s_runtime->mutex);
 }
 
 static int pending_find_slot_locked(const char *event_id)
@@ -237,8 +262,8 @@ static int pending_find_slot_locked(const char *event_id)
         return -1;
     }
     for (int i = 0; i < (int)CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE; i++) {
-        if (s_runtime.pending[i].used &&
-                strcmp(s_runtime.pending[i].event_id, event_id) == 0) {
+        if (s_runtime->pending[i].used &&
+                strcmp(s_runtime->pending[i].event_id, event_id) == 0) {
             return i;
         }
     }
@@ -250,12 +275,12 @@ static int pending_alloc_slot_locked(void)
     int oldest = -1;
 
     for (int i = 0; i < (int)CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE; i++) {
-        if (!s_runtime.pending[i].used) {
+        if (!s_runtime->pending[i].used) {
             return i;
         }
     }
     for (int i = 0; i < (int)CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE; i++) {
-        if (!s_runtime.pending[i].cancelled) {
+        if (!s_runtime->pending[i].cancelled) {
             oldest = i;
             break;
         }
@@ -275,24 +300,24 @@ static void pending_track(const claw_event_t *event)
     int slot = pending_find_slot_locked(event->event_id);
     if (slot < 0) {
         slot = pending_alloc_slot_locked();
-        if (s_runtime.pending[slot].used) {
-            s_runtime.pending_dropped++;
+        if (s_runtime->pending[slot].used) {
+            s_runtime->pending_dropped++;
             ESP_LOGW(TAG,
                      "Pending table full, evicting %s to track %s (dropped=%u)",
-                     s_runtime.pending[slot].event_id,
+                     s_runtime->pending[slot].event_id,
                      event->event_id,
-                     (unsigned)s_runtime.pending_dropped);
+                     (unsigned)s_runtime->pending_dropped);
         }
     }
-    memset(&s_runtime.pending[slot], 0, sizeof(s_runtime.pending[slot]));
-    s_runtime.pending[slot].used = true;
-    s_runtime.pending[slot].cancelled = false;
-    strlcpy(s_runtime.pending[slot].event_id,
-            event->event_id, sizeof(s_runtime.pending[slot].event_id));
-    strlcpy(s_runtime.pending[slot].event_type,
-            event->event_type, sizeof(s_runtime.pending[slot].event_type));
-    strlcpy(s_runtime.pending[slot].source_cap,
-            event->source_cap, sizeof(s_runtime.pending[slot].source_cap));
+    memset(&s_runtime->pending[slot], 0, sizeof(s_runtime->pending[slot]));
+    s_runtime->pending[slot].used = true;
+    s_runtime->pending[slot].cancelled = false;
+    strlcpy(s_runtime->pending[slot].event_id,
+            event->event_id, sizeof(s_runtime->pending[slot].event_id));
+    strlcpy(s_runtime->pending[slot].event_type,
+            event->event_type, sizeof(s_runtime->pending[slot].event_type));
+    strlcpy(s_runtime->pending[slot].source_cap,
+            event->source_cap, sizeof(s_runtime->pending[slot].source_cap));
     claw_event_router_unlock();
 }
 
@@ -306,8 +331,8 @@ static bool pending_take_for_event_id(const char *event_id)
     claw_event_router_lock();
     int slot = pending_find_slot_locked(event_id);
     if (slot >= 0) {
-        cancelled = s_runtime.pending[slot].cancelled;
-        memset(&s_runtime.pending[slot], 0, sizeof(s_runtime.pending[slot]));
+        cancelled = s_runtime->pending[slot].cancelled;
+        memset(&s_runtime->pending[slot], 0, sizeof(s_runtime->pending[slot]));
     }
     claw_event_router_unlock();
     return cancelled;
@@ -656,7 +681,7 @@ static esp_err_t claw_event_router_parse_rule(const cJSON *item,
     }
 
     action_count = (size_t)cJSON_GetArraySize(actions);
-    if (action_count > s_runtime.max_actions_per_rule) {
+    if (action_count > s_runtime->max_actions_per_rule) {
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -883,7 +908,7 @@ static esp_err_t claw_event_router_load_rules_from_root(const cJSON *root,
     if (!cJSON_IsArray((cJSON *)root)) {
         return ESP_ERR_INVALID_RESPONSE;
     }
-    if ((size_t)cJSON_GetArraySize((cJSON *)root) > s_runtime.max_rules) {
+    if ((size_t)cJSON_GetArraySize((cJSON *)root) > s_runtime->max_rules) {
         return ESP_ERR_INVALID_SIZE;
     }
     if (cJSON_GetArraySize((cJSON *)root) > 0) {
@@ -1014,7 +1039,7 @@ static esp_err_t claw_event_router_commit_rules(cJSON *root,
         return ESP_ERR_NO_MEM;
     }
 
-    err = claw_event_router_write_rules_json_file(s_runtime.rules_path, json);
+    err = claw_event_router_write_rules_json_file(s_runtime->rules_path, json);
     free(json);
     cJSON_Delete(root);
     if (err != ESP_OK) {
@@ -1023,9 +1048,9 @@ static esp_err_t claw_event_router_commit_rules(cJSON *root,
     }
 
     claw_event_router_lock();
-    claw_event_router_free_rules(s_runtime.rules, s_runtime.rule_count);
-    s_runtime.rules = new_rules;
-    s_runtime.rule_count = new_rule_count;
+    claw_event_router_free_rules(s_runtime->rules, s_runtime->rule_count);
+    s_runtime->rules = new_rules;
+    s_runtime->rule_count = new_rule_count;
     claw_event_router_unlock();
     return ESP_OK;
 }
@@ -1307,11 +1332,11 @@ static size_t claw_event_router_build_session_id_with_config(const claw_event_t 
                                                              char *buf,
                                                              size_t buf_size)
 {
-    if (s_runtime.config.session_builder) {
-        return s_runtime.config.session_builder(event,
+    if (s_runtime->config.session_builder) {
+        return s_runtime->config.session_builder(event,
                                                 buf,
                                                 buf_size,
-                                                s_runtime.config.session_builder_user_ctx);
+                                                s_runtime->config.session_builder_user_ctx);
     }
     return claw_event_build_session_id(event, buf, buf_size);
 }
@@ -1333,10 +1358,10 @@ static esp_err_t claw_event_router_default_outbound_resolver(const claw_event_t 
     cap_name[0] = '\0';
 
     claw_event_router_lock();
-    for (i = 0; i < s_runtime.binding_count; i++) {
-        if (strcmp(s_runtime.bindings[i].channel, target_channel ? target_channel : "") == 0) {
+    for (i = 0; i < s_runtime->binding_count; i++) {
+        if (strcmp(s_runtime->bindings[i].channel, target_channel ? target_channel : "") == 0) {
             strlcpy(cap_name,
-                    s_runtime.bindings[i].cap_name,
+                    s_runtime->bindings[i].cap_name,
                     cap_name_size);
             claw_event_router_unlock();
             return ESP_OK;
@@ -1352,13 +1377,13 @@ static esp_err_t claw_event_router_resolve_outbound_cap(const claw_event_t *even
                                                         char *cap_name,
                                                         size_t cap_name_size)
 {
-    if (s_runtime.config.outbound_resolver) {
-        esp_err_t err = s_runtime.config.outbound_resolver(event,
+    if (s_runtime->config.outbound_resolver) {
+        esp_err_t err = s_runtime->config.outbound_resolver(event,
                                                            target_channel,
                                                            target_endpoint,
                                                            cap_name,
                                                            cap_name_size,
-                                                           s_runtime.config.outbound_resolver_user_ctx);
+                                                           s_runtime->config.outbound_resolver_user_ctx);
         if (err != ESP_ERR_NOT_FOUND) {
             return err;
         }
@@ -1450,7 +1475,7 @@ static esp_err_t claw_event_router_execute_cap_action(
         return ESP_ERR_NO_MEM;
     }
 
-    output = calloc(1, s_runtime.cap_output_size);
+    output = calloc(1, s_runtime->cap_output_size);
     if (!output) {
         free(input_json);
         return ESP_ERR_NO_MEM;
@@ -1469,7 +1494,7 @@ static esp_err_t claw_event_router_execute_cap_action(
                         input_json,
                         &call_ctx,
                         output,
-                        s_runtime.cap_output_size);
+                        s_runtime->cap_output_size);
     free(input_json);
 
     claw_event_router_update_last_output(ctx,
@@ -1536,7 +1561,7 @@ static esp_err_t claw_event_router_execute_agent_action(
         claw_event_router_parse_session_policy(session_policy, &agent_event.session_policy);
     }
 
-    request.request_id = s_runtime.next_request_id++;
+    request.request_id = s_runtime->next_request_id++;
     if (claw_event_router_build_session_id_with_config(&agent_event, session_id, sizeof(session_id)) > 0) {
         request.session_id = session_id;
     }
@@ -1551,7 +1576,7 @@ static esp_err_t claw_event_router_execute_agent_action(
     request.target_channel = (target_channel && target_channel[0]) ? target_channel : event->source_channel;
     request.target_chat_id = (target_chat_id && target_chat_id[0]) ? target_chat_id : event->chat_id;
 
-    err = claw_core_submit(&request, s_runtime.config.core_submit_timeout_ms);
+    err = claw_core_submit(&request, s_runtime->config.core_submit_timeout_ms);
 
     if (err == ESP_OK) {
         snprintf(submit_output, sizeof(submit_output), "request_id=%" PRIu32, request.request_id);
@@ -1870,7 +1895,7 @@ static esp_err_t claw_event_router_process_event(const claw_event_t *event,
     strlcpy(local.ack, "processing", sizeof(local.ack));
 
     claw_event_router_lock();
-    s_runtime.last_result = local;
+    s_runtime->last_result = local;
     claw_event_router_unlock();
 
     if (strcmp(event->source_cap, "claw_event_router") == 0) {
@@ -1895,8 +1920,8 @@ static esp_err_t claw_event_router_process_event(const claw_event_t *event,
         return ESP_ERR_NO_MEM;
     }
 
-    for (size_t i = 0; i < s_runtime.rule_count; i++) {
-        claw_event_router_rule_t *rule = &s_runtime.rules[i];
+    for (size_t i = 0; i < s_runtime->rule_count; i++) {
+        claw_event_router_rule_t *rule = &s_runtime->rules[i];
         cJSON *rule_obj = NULL;
         cJSON *vars_obj = NULL;
         esp_err_t rule_err = ESP_OK;
@@ -1970,7 +1995,7 @@ static esp_err_t claw_event_router_process_event(const claw_event_t *event,
     }
 
     if (!local.matched &&
-            s_runtime.config.default_route_messages_to_agent &&
+            s_runtime->config.default_route_messages_to_agent &&
             strcmp(event->event_type, "message") == 0 &&
             event->text && event->text[0]) {
         esp_err_t err;
@@ -1980,7 +2005,7 @@ static esp_err_t claw_event_router_process_event(const claw_event_t *event,
         cJSON_Delete(ctx);
         err = claw_event_router_run_default_agent(event, &fallback);
         claw_event_router_lock();
-        s_runtime.last_result = fallback;
+        s_runtime->last_result = fallback;
         claw_event_router_unlock();
         if (out_result) {
             *out_result = fallback;
@@ -1992,7 +2017,7 @@ static esp_err_t claw_event_router_process_event(const claw_event_t *event,
         snprintf(local.ack, sizeof(local.ack), "matched:%s",
                  local.first_rule_id[0] ? local.first_rule_id : "(unknown)");
     }
-    s_runtime.last_result = local;
+    s_runtime->last_result = local;
     cJSON_Delete(ctx);
     claw_event_router_unlock();
 
@@ -2008,11 +2033,11 @@ static void claw_event_router_task(void *arg)
 
     ESP_LOGI(TAG, "event router task started");
 
-    while (!s_runtime.stop_requested) {
+    while (!s_runtime->stop_requested) {
         claw_event_t event = {0};
         claw_event_router_result_t result = {0};
 
-        if (xQueueReceive(s_runtime.event_queue, &event, pdMS_TO_TICKS(250)) != pdTRUE) {
+        if (xQueueReceive(s_runtime->event_queue, &event, pdMS_TO_TICKS(250)) != pdTRUE) {
             continue;
         }
         if (pending_take_for_event_id(event.event_id)) {
@@ -2029,41 +2054,45 @@ static void claw_event_router_task(void *arg)
         claw_event_free(&event);
     }
 
-    s_runtime.task_handle = NULL;
-    s_runtime.started = false;
+    s_runtime->task_handle = NULL;
+    s_runtime->started = false;
     claw_task_delete(NULL);
 }
 
 esp_err_t claw_event_router_init(const claw_event_router_config_t *config)
 {
-    if (s_runtime.initialized) {
+    if (s_runtime && s_runtime->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
     if (!config || !config->rules_path || !config->rules_path[0]) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_runtime.mutex) {
-        s_runtime.mutex = xSemaphoreCreateRecursiveMutex();
+    s_runtime = calloc(1, sizeof(*s_runtime));
+    if (!s_runtime) {
+        return ESP_ERR_NO_MEM;
     }
-    if (!s_runtime.mutex) {
+    claw_event_router_init_defaults(s_runtime);
+    s_runtime->mutex = xSemaphoreCreateRecursiveMutex();
+    if (!s_runtime->mutex) {
+        claw_event_router_free_runtime();
         return ESP_ERR_NO_MEM;
     }
 
-    memset(&s_runtime.config, 0, sizeof(s_runtime.config));
-    s_runtime.config.task_core = tskNO_AFFINITY;
+    memset(&s_runtime->config, 0, sizeof(s_runtime->config));
+    s_runtime->config.task_core = tskNO_AFFINITY;
     if (config) {
-        s_runtime.config = *config;
+        s_runtime->config = *config;
     }
-    strlcpy(s_runtime.rules_path, config->rules_path, sizeof(s_runtime.rules_path));
+    strlcpy(s_runtime->rules_path, config->rules_path, sizeof(s_runtime->rules_path));
     if (config && config->max_rules > 0) {
-        s_runtime.max_rules = config->max_rules;
+        s_runtime->max_rules = config->max_rules;
     }
     if (config && config->max_actions_per_rule > 0) {
-        s_runtime.max_actions_per_rule = config->max_actions_per_rule;
+        s_runtime->max_actions_per_rule = config->max_actions_per_rule;
     }
     if (config && config->cap_output_size > 0) {
-        s_runtime.cap_output_size = config->cap_output_size;
+        s_runtime->cap_output_size = config->cap_output_size;
     }
 
     uint32_t queue_len = config && config->event_queue_len ? config->event_queue_len
@@ -2072,16 +2101,25 @@ esp_err_t claw_event_router_init(const claw_event_router_config_t *config)
         ESP_LOGE(TAG, "event_queue_len=%u exceeds pending table size %u",
                  (unsigned)queue_len,
                  (unsigned)CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE);
+        claw_event_router_free_runtime();
         return ESP_ERR_INVALID_ARG;
     }
-    s_runtime.event_queue = xQueueCreate(queue_len, sizeof(claw_event_t));
-    if (!s_runtime.event_queue) {
+    s_runtime->event_queue = xQueueCreate(queue_len, sizeof(claw_event_t));
+    if (!s_runtime->event_queue) {
+        claw_event_router_free_runtime();
         return ESP_ERR_NO_MEM;
     }
 
-    s_runtime.initialized = true;
-    ESP_LOGI(TAG, "Rules path: %s", s_runtime.rules_path);
-    return claw_event_router_reload();
+    s_runtime->initialized = true;
+    ESP_LOGI(TAG, "Rules path: %s", s_runtime->rules_path);
+    {
+        esp_err_t err = claw_event_router_reload();
+        if (err != ESP_OK) {
+            claw_event_router_free_runtime();
+            return err;
+        }
+    }
+    return ESP_OK;
 }
 
 esp_err_t claw_event_router_start(void)
@@ -2091,23 +2129,23 @@ esp_err_t claw_event_router_start(void)
     UBaseType_t priority;
     BaseType_t core;
 
-    if (!s_runtime.initialized) {
+    if (!s_runtime || !s_runtime->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (s_runtime.started) {
+    if (s_runtime->started) {
         return ESP_OK;
     }
 
-    stack_size = s_runtime.config.task_stack_size ?
-                 s_runtime.config.task_stack_size : CLAW_EVENT_ROUTER_DEFAULT_STACK;
-    priority = s_runtime.config.task_priority ?
-               s_runtime.config.task_priority : CLAW_EVENT_ROUTER_DEFAULT_PRIO;
-    core = s_runtime.config.task_core;
-    s_runtime.config.core_submit_timeout_ms = s_runtime.config.core_submit_timeout_ms ?
-                                              s_runtime.config.core_submit_timeout_ms : CLAW_EVENT_ROUTER_DEFAULT_SUBMIT;
-    s_runtime.config.core_receive_timeout_ms = s_runtime.config.core_receive_timeout_ms ?
-                                               s_runtime.config.core_receive_timeout_ms : CLAW_EVENT_ROUTER_DEFAULT_RECEIVE;
-    s_runtime.stop_requested = false;
+    stack_size = s_runtime->config.task_stack_size ?
+                 s_runtime->config.task_stack_size : CLAW_EVENT_ROUTER_DEFAULT_STACK;
+    priority = s_runtime->config.task_priority ?
+               s_runtime->config.task_priority : CLAW_EVENT_ROUTER_DEFAULT_PRIO;
+    core = s_runtime->config.task_core;
+    s_runtime->config.core_submit_timeout_ms = s_runtime->config.core_submit_timeout_ms ?
+                                              s_runtime->config.core_submit_timeout_ms : CLAW_EVENT_ROUTER_DEFAULT_SUBMIT;
+    s_runtime->config.core_receive_timeout_ms = s_runtime->config.core_receive_timeout_ms ?
+                                               s_runtime->config.core_receive_timeout_ms : CLAW_EVENT_ROUTER_DEFAULT_RECEIVE;
+    s_runtime->stop_requested = false;
 
     task_ok = claw_task_create(&(claw_task_config_t){
                                    .name = "event_router",
@@ -2118,13 +2156,13 @@ esp_err_t claw_event_router_start(void)
                                },
                                claw_event_router_task,
                                NULL,
-                               &s_runtime.task_handle);
+                               &s_runtime->task_handle);
     if (task_ok != pdPASS) {
-        s_runtime.task_handle = NULL;
+        s_runtime->task_handle = NULL;
         return ESP_FAIL;
     }
 
-    s_runtime.started = true;
+    s_runtime->started = true;
     return ESP_OK;
 }
 
@@ -2132,17 +2170,17 @@ esp_err_t claw_event_router_stop(void)
 {
     TickType_t deadline;
 
-    if (!s_runtime.started || !s_runtime.task_handle) {
+    if (!s_runtime || !s_runtime->started || !s_runtime->task_handle) {
         return ESP_OK;
     }
 
-    s_runtime.stop_requested = true;
+    s_runtime->stop_requested = true;
     deadline = xTaskGetTickCount() + pdMS_TO_TICKS(5000);
-    while (s_runtime.task_handle && xTaskGetTickCount() < deadline) {
+    while (s_runtime->task_handle && xTaskGetTickCount() < deadline) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
-    return s_runtime.task_handle ? ESP_ERR_TIMEOUT : ESP_OK;
+    return s_runtime->task_handle ? ESP_ERR_TIMEOUT : ESP_OK;
 }
 
 esp_err_t claw_event_router_reload(void)
@@ -2151,11 +2189,11 @@ esp_err_t claw_event_router_reload(void)
     size_t new_rule_count = 0;
     esp_err_t err;
 
-    if (!s_runtime.initialized) {
+    if (!s_runtime || !s_runtime->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    err = claw_event_router_load_rules_from_file(s_runtime.rules_path,
+    err = claw_event_router_load_rules_from_file(s_runtime->rules_path,
                                                  &new_rules,
                                                  &new_rule_count,
                                                  NULL);
@@ -2164,9 +2202,9 @@ esp_err_t claw_event_router_reload(void)
     }
 
     claw_event_router_lock();
-    claw_event_router_free_rules(s_runtime.rules, s_runtime.rule_count);
-    s_runtime.rules = new_rules;
-    s_runtime.rule_count = new_rule_count;
+    claw_event_router_free_rules(s_runtime->rules, s_runtime->rule_count);
+    s_runtime->rules = new_rules;
+    s_runtime->rule_count = new_rule_count;
     claw_event_router_unlock();
 
     ESP_LOGI(TAG, "Loaded %u router rules", (unsigned int)new_rule_count);
@@ -2177,7 +2215,7 @@ esp_err_t claw_event_router_cancel_event(const char *event_id)
 {
     bool armed = false;
 
-    if (!s_runtime.initialized) {
+    if (!s_runtime || !s_runtime->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
     if (!event_id || !event_id[0]) {
@@ -2186,13 +2224,13 @@ esp_err_t claw_event_router_cancel_event(const char *event_id)
 
     claw_event_router_lock();
     int slot = pending_find_slot_locked(event_id);
-    if (slot >= 0 && !s_runtime.pending[slot].cancelled) {
-        s_runtime.pending[slot].cancelled = true;
+    if (slot >= 0 && !s_runtime->pending[slot].cancelled) {
+        s_runtime->pending[slot].cancelled = true;
         armed = true;
         ESP_LOGI(TAG, "Cancel armed for queued event %s (type=%s, source=%s)",
-                 s_runtime.pending[slot].event_id,
-                 s_runtime.pending[slot].event_type,
-                 s_runtime.pending[slot].source_cap);
+                 s_runtime->pending[slot].event_id,
+                 s_runtime->pending[slot].event_type,
+                 s_runtime->pending[slot].source_cap);
     }
     claw_event_router_unlock();
     return armed ? ESP_OK : ESP_ERR_NOT_FOUND;
@@ -2204,7 +2242,7 @@ esp_err_t claw_event_router_purge_queue(const char *event_type_filter,
 {
     size_t armed = 0;
 
-    if (!s_runtime.initialized) {
+    if (!s_runtime || !s_runtime->initialized) {
         if (out_cancelled) {
             *out_cancelled = 0;
         }
@@ -2213,14 +2251,14 @@ esp_err_t claw_event_router_purge_queue(const char *event_type_filter,
 
     claw_event_router_lock();
     for (int i = 0; i < (int)CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE; i++) {
-        if (!s_runtime.pending[i].used || s_runtime.pending[i].cancelled) {
+        if (!s_runtime->pending[i].used || s_runtime->pending[i].cancelled) {
             continue;
         }
-        if (!pending_match_filter(&s_runtime.pending[i],
+        if (!pending_match_filter(&s_runtime->pending[i],
                                   event_type_filter, source_cap_filter)) {
             continue;
         }
-        s_runtime.pending[i].cancelled = true;
+        s_runtime->pending[i].cancelled = true;
         armed++;
     }
     claw_event_router_unlock();
@@ -2240,7 +2278,7 @@ esp_err_t claw_event_router_publish(const claw_event_t *event)
     claw_event_t cloned = {0};
     esp_err_t err;
 
-    if (!s_runtime.initialized || !event || !event->source_cap[0] || !event->event_type[0]) {
+    if (!s_runtime || !s_runtime->initialized || !event || !event->source_cap[0] || !event->event_type[0]) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -2249,7 +2287,7 @@ esp_err_t claw_event_router_publish(const claw_event_t *event)
         return err;
     }
     pending_track(&cloned);
-    if (xQueueSend(s_runtime.event_queue, &cloned, pdMS_TO_TICKS(1000)) != pdTRUE) {
+    if (xQueueSend(s_runtime->event_queue, &cloned, pdMS_TO_TICKS(1000)) != pdTRUE) {
         (void)pending_take_for_event_id(cloned.event_id);
         claw_event_free(&cloned);
         return ESP_ERR_TIMEOUT;
@@ -2316,32 +2354,32 @@ esp_err_t claw_event_router_publish_trigger(const char *source_cap,
 esp_err_t claw_event_router_register_outbound_binding(const char *channel,
                                                       const char *cap_name)
 {
-    if (!s_runtime.initialized || !channel || !channel[0] ||
+    if (!s_runtime || !s_runtime->initialized || !channel || !channel[0] ||
             !cap_name || !cap_name[0]) {
         return ESP_ERR_INVALID_ARG;
     }
 
     claw_event_router_lock();
-    for (size_t i = 0; i < s_runtime.binding_count; i++) {
-        if (strcmp(s_runtime.bindings[i].channel, channel) == 0) {
-            strlcpy(s_runtime.bindings[i].cap_name,
+    for (size_t i = 0; i < s_runtime->binding_count; i++) {
+        if (strcmp(s_runtime->bindings[i].channel, channel) == 0) {
+            strlcpy(s_runtime->bindings[i].cap_name,
                     cap_name,
-                    sizeof(s_runtime.bindings[i].cap_name));
+                    sizeof(s_runtime->bindings[i].cap_name));
             claw_event_router_unlock();
             return ESP_OK;
         }
     }
-    if (s_runtime.binding_count >= CLAW_EVENT_ROUTER_BINDING_SIZE) {
+    if (s_runtime->binding_count >= CLAW_EVENT_ROUTER_BINDING_SIZE) {
         claw_event_router_unlock();
         return ESP_ERR_NO_MEM;
     }
-    strlcpy(s_runtime.bindings[s_runtime.binding_count].channel,
+    strlcpy(s_runtime->bindings[s_runtime->binding_count].channel,
             channel,
-            sizeof(s_runtime.bindings[s_runtime.binding_count].channel));
-    strlcpy(s_runtime.bindings[s_runtime.binding_count].cap_name,
+            sizeof(s_runtime->bindings[s_runtime->binding_count].channel));
+    strlcpy(s_runtime->bindings[s_runtime->binding_count].cap_name,
             cap_name,
-            sizeof(s_runtime.bindings[s_runtime.binding_count].cap_name));
-    s_runtime.binding_count++;
+            sizeof(s_runtime->bindings[s_runtime->binding_count].cap_name));
+    s_runtime->binding_count++;
     claw_event_router_unlock();
     return ESP_OK;
 }
@@ -2349,13 +2387,21 @@ esp_err_t claw_event_router_register_outbound_binding(const char *channel,
 esp_err_t claw_event_router_handle_event(const claw_event_t *event,
                                          claw_event_router_result_t *out_result)
 {
+    if (!s_runtime || !s_runtime->initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     return claw_event_router_process_event(event, out_result);
 }
 
 esp_err_t claw_event_router_list_rules(claw_event_router_rule_t **out_rules,
                                        size_t *out_rule_count)
 {
-    return claw_event_router_load_rules_from_file(s_runtime.rules_path,
+    if (!s_runtime || !s_runtime->initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return claw_event_router_load_rules_from_file(s_runtime->rules_path,
                                                   out_rules,
                                                   out_rule_count,
                                                   NULL);
@@ -2399,18 +2445,18 @@ esp_err_t claw_event_router_add_rule(const claw_event_router_rule_t *rule)
     cJSON *rule_json = NULL;
     esp_err_t err;
 
-    if (!s_runtime.initialized || !rule) {
-        return s_runtime.initialized ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_STATE;
+    if (!s_runtime || !s_runtime->initialized || !rule) {
+        return (s_runtime && s_runtime->initialized) ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_STATE;
     }
 
-    err = claw_event_router_load_rules_from_file(s_runtime.rules_path,
+    err = claw_event_router_load_rules_from_file(s_runtime->rules_path,
                                                  &loaded_rules,
                                                  &old_rule_count,
                                                  &root);
     if (err != ESP_OK) {
         return err;
     }
-    if (old_rule_count >= s_runtime.max_rules) {
+    if (old_rule_count >= s_runtime->max_rules) {
         cJSON_Delete(root);
         claw_event_router_free_rule_list(loaded_rules, old_rule_count);
         return ESP_ERR_INVALID_SIZE;
@@ -2453,11 +2499,11 @@ esp_err_t claw_event_router_update_rule(const claw_event_router_rule_t *rule)
     esp_err_t err;
     bool found = false;
 
-    if (!s_runtime.initialized || !rule) {
-        return s_runtime.initialized ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_STATE;
+    if (!s_runtime || !s_runtime->initialized || !rule) {
+        return (s_runtime && s_runtime->initialized) ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_STATE;
     }
 
-    err = claw_event_router_load_rules_from_file(s_runtime.rules_path,
+    err = claw_event_router_load_rules_from_file(s_runtime->rules_path,
                                                  &loaded_rules,
                                                  &old_rule_count,
                                                  &root);
@@ -2504,11 +2550,11 @@ esp_err_t claw_event_router_delete_rule(const char *id)
     esp_err_t err;
     bool found = false;
 
-    if (!s_runtime.initialized || !id || !id[0]) {
-        return s_runtime.initialized ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_STATE;
+    if (!s_runtime || !s_runtime->initialized || !id || !id[0]) {
+        return (s_runtime && s_runtime->initialized) ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_STATE;
     }
 
-    err = claw_event_router_load_rules_from_file(s_runtime.rules_path,
+    err = claw_event_router_load_rules_from_file(s_runtime->rules_path,
                                                  &loaded_rules,
                                                  &old_rule_count,
                                                  &root);
@@ -2593,8 +2639,11 @@ esp_err_t claw_event_router_list_rules_json(char *output, size_t output_size)
     if (!output || output_size == 0) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!s_runtime || !s_runtime->initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
 
-    err = claw_event_router_read_file(s_runtime.rules_path, &buf);
+    err = claw_event_router_read_file(s_runtime->rules_path, &buf);
     if (err == ESP_ERR_NOT_FOUND) {
         strlcpy(output, "[]", output_size);
         return ESP_OK;
@@ -2656,12 +2705,12 @@ esp_err_t claw_event_router_get_last_result(claw_event_router_result_t *out_resu
     if (!out_result) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (!s_runtime.initialized) {
+    if (!s_runtime || !s_runtime->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     claw_event_router_lock();
-    *out_result = s_runtime.last_result;
+    *out_result = s_runtime->last_result;
     claw_event_router_unlock();
     return ESP_OK;
 }
