@@ -5,6 +5,7 @@
  */
 #include "basic_demo_lua_modules.h"
 
+#include "lua_module_adc.h"
 #include "lua_module_delay.h"
 #include "lua_module_event_publisher.h"
 #include "lua_module_gpio.h"
@@ -112,6 +113,11 @@ esp_err_t basic_demo_lua_modules_register(void)
     }
 
     err = lua_module_uart_register();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = lua_module_adc_register();
     if (err != ESP_OK) {
         return err;
     }
