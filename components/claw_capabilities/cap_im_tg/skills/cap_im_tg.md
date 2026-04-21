@@ -13,7 +13,7 @@ Use this skill when the user wants to interact through Telegram, especially to r
 - `tg_send_file`: send a local non-image file to a Telegram chat.
 
 ## Calling rules
-- Call the direct Telegram capabilities. Do not route Telegram messaging through `cap_cli`.
+- Call the direct Telegram capabilities.
 - When replying to the current inbound Telegram conversation, you can omit `chat_id` if the runtime context already contains it.
 - When starting a new outbound send or the target chat is ambiguous, pass an explicit `chat_id`.
 - Use `tg_send_message` for text only.

@@ -22,7 +22,7 @@ Use this skill when the user needs to inspect or control timer-based schedule ru
 - `scheduler_reload`: reload scheduler definitions from disk.
 
 ## Calling rules
-- Use the direct scheduler capabilities. Do not route scheduler operations through `cap_cli` unless the user explicitly asks for console commands.
+
 - `scheduler_add` and `scheduler_update` input must be:
 
 ```json

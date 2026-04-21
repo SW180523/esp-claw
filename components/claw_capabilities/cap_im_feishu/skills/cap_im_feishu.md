@@ -13,7 +13,7 @@ Use this skill when the user wants to interact through Feishu, especially to rep
 - `feishu_send_file`: send a local non-image file to a Feishu chat.
 
 ## Calling rules
-- Call the direct Feishu capabilities. Do not route Feishu messaging through `cap_cli`.
+- Call the direct Feishu capabilities.
 - When replying to the current inbound Feishu conversation, you can omit `chat_id` if the runtime context already contains it.
 - When starting a new outbound send or the target chat is ambiguous, pass an explicit `chat_id`.
 - Use `feishu_send_message` for text only.

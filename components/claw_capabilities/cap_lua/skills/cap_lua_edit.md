@@ -4,7 +4,7 @@ Use this skill when the user wants to create, modify, or organize Lua scripts. T
 
 ## Core Constraints
 
-- Use `lua_write_script` for writes. Do not use `cap_cli`.
+- Use `lua_write_script` for writes. 
 - Prefer reusing or adapting an existing script. Create a new script only when existing scripts cannot satisfy the requirement.
 - `path` must be a relative `.lua` path such as `builtin/foo.lua`, `temp/foo.lua`, or `user/bar.lua`.
 - Do not use absolute paths, do not include `..`, and do not write non-`.lua` files.

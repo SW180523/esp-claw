@@ -13,7 +13,7 @@ Use this skill when the user wants to interact through QQ Bot channels, especial
 - `qq_send_file`: send a local non-image file to a QQ chat.
 
 ## Calling rules
-- Call the direct QQ capabilities. Do not route QQ messaging through `cap_cli`.
+- Call the direct QQ capabilities.
 - When replying to the current inbound QQ conversation, you can omit `chat_id` if the runtime context already contains it.
 - When starting a new outbound send or the target chat is ambiguous, pass an explicit `chat_id`.
 - Use `qq_send_message` for text only.

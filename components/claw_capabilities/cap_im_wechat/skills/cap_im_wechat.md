@@ -13,7 +13,7 @@ Use this skill when the user wants to interact through WeChat, especially to sen
 - `wechat_gateway`: WeChat inbound event source. This is infrastructure, not a capability the model should call directly.
 
 ## Calling rules
-- Call the direct WeChat capabilities. Do not route WeChat messaging through `cap_cli`.
+- Call the direct WeChat capabilities.
 - `wechat_send_message` requires explicit `chat_id` and `message`.
 - `wechat_send_image` requires explicit `chat_id` and `path`, with optional `caption`.
 - Unlike Telegram, QQ, and Feishu, the current WeChat callable implementation does not fall back to `ctx->chat_id`. Always pass `chat_id` explicitly.

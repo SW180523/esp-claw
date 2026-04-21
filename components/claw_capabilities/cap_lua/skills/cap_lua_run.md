@@ -4,7 +4,7 @@ Use this skill when the user wants to inspect existing Lua scripts, run a script
 
 ## Core Constraints
 
-- Call the direct `cap_lua` capability entrypoints. Do not use `cap_cli`.
+- Call the direct `cap_lua` capability entrypoints.
 - `path` must be a relative `.lua` path.
 - If the user asks to stop, cancel, close, or clear an async script, you must actually call `lua_stop_async_job`, `lua_stop_all_async_jobs`, or `lua_run_script_async` with `replace:true` in the same turn. Do not claim the job is stopped based only on context.
 - Do not deactivate this skill while async Lua jobs are still running, or you lose the stop/list entrypoints needed to manage them.

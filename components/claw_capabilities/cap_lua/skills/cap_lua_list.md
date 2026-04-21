@@ -4,7 +4,6 @@ Use this skill when the user wants to find existing Lua scripts, filter scripts 
 
 ## Core Constraints
 
-- Use `lua_list_scripts` for script discovery. Do not use `cap_cli`.
 - Prefer finding and reusing an existing script before proposing a new one. Create a new script only when no existing script can satisfy the requirement.
 - `lua_list_scripts` returns paths relative to the Lua script root.
 - Built-in scripts live under `builtin/`. User-authored scripts should live under `temp/` or `user/`.
