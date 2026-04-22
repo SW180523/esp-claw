@@ -1,10 +1,18 @@
 import type { Lang } from "./locales";
+
 import ChatCodingWebm from "@/assets/features/chat-coding.webm?url";
 import EventWebm from "@/assets/features/event.webm?url";
 import LocalLuaWebm from "@/assets/features/locallua.webm?url";
 import McpWebm from "@/assets/features/mcp.webm?url";
 import MemoryWebm from "@/assets/features/memory.webm?url";
 import MultiWebm from "@/assets/features/multi.webm?url";
+
+import ChatCodingWebmEn from "@/assets/features/chat-coding-en.webm?url";
+import EventWebmEn from "@/assets/features/event-en.webm?url";
+import LocalLuaWebmEn from "@/assets/features/locallua-en.webm?url";
+import McpWebmEn from "@/assets/features/mcp-en.webm?url";
+import MemoryWebmEn from "@/assets/features/memory-en.webm?url";
+import MultiWebmEn from "@/assets/features/multi-en.webm?url";
 
 export interface TerminalLine {
   cls: "prompt" | "output" | "info" | "warn";
@@ -90,37 +98,37 @@ const en: HomeContent = {
     {
       title: "No Programming Required, \"Chat as Creation\"",
       desc: "Generate various driver codes through natural language descriptions. Just send requirements via IM.",
-      video: ChatCodingWebm,
+      video: ChatCodingWebmEn,
       posterTime: 10,
     },
     {
       title: "Complex Applications, Handled with Ease",
       desc: "Combine multiple peripherals freely, orchestrated by LLM, to realize complex applications.",
-      video: MultiWebm,
+      video: MultiWebmEn,
       posterTime: 16,
     },
     {
       title: "Stable Operation for Critical Tasks",
       desc: "Critical operations can be saved as Lua scripts. Reproducible execution ensures stable operation.",
-      video: LocalLuaWebm,
+      video: LocalLuaWebmEn,
       posterTime: 8,
     },
     {
       title: "Event-Driven, Proactive Perception",
       desc: "Adopts an event-driven architecture, balancing local swiftness and LLM flexibility for cloud-edge collaboration.",
-      video: EventWebm,
+      video: EventWebmEn,
       posterTime: 16,
     },
     {
       title: "Standard Interfaces, Smart Expansion",
       desc: "Compatible with standard MCP protocol, supporting both Client and Server modes.",
-      video: McpWebm,
+      video: McpWebmEn,
       posterTime: 7,
     },
     {
       title: "Understands Your Needs, Adapts to You",
       desc: "Implements a localized structured long-term memory system. Intelligently records user preferences and habits, saved locally.",
-      video: MemoryWebm,
+      video: MemoryWebmEn,
       posterTime: 15,
     },
   ],
