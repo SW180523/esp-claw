@@ -23,6 +23,9 @@
 .patterns-application_basic_demo: &patterns-application_basic_demo
   - "application/basic_demo/**/*"
 
+.patterns-application_edge_agent: &patterns-application_edge_agent
+  - "application/edge_agent/**/*"
+
 .patterns-docs: &patterns-docs
   - "docs/**/*"
 
@@ -74,6 +77,25 @@
       changes: *patterns-components_lua_modules
     - <<: *if-mr
       changes: *patterns-application_basic_demo
+    - <<: *if-mr
+      changes: *patterns-docs
+    - when: never
+
+.rules:build:application_edge_agent:
+  rules:
+    - <<: *if-protected-push
+    - <<: *if-label-build
+    - <<: *if-trigger-job
+    - <<: *if-mr
+      changes: *patterns-build_system
+    - <<: *if-mr
+      changes: *patterns-components_capabilities
+    - <<: *if-mr
+      changes: *patterns-components_modules
+    - <<: *if-mr
+      changes: *patterns-components_lua_modules
+    - <<: *if-mr
+      changes: *patterns-application_edge_agent
     - <<: *if-mr
       changes: *patterns-docs
     - when: never
