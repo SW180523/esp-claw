@@ -17,8 +17,6 @@
 #include "gfx.h"
 #include "display_arbiter.h"
 
-#if defined(CONFIG_APP_ENABLE_EMOTE)
-
 static const char *TAG = "app_emote";
 
 #define EMOTE_ASSETS_PARTITION "emote"
@@ -250,19 +248,3 @@ esp_err_t emote_start(void)
     }
     return err;
 }
-
-#else
-
-esp_err_t emote_start(void)
-{
-    return ESP_OK;
-}
-
-esp_err_t emote_set_network_status(bool sta_connected, const char *ap_ssid)
-{
-    (void)sta_connected;
-    (void)ap_ssid;
-    return ESP_OK;
-}
-
-#endif

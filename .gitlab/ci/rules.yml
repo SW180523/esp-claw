@@ -19,6 +19,9 @@
 .patterns-components_lua_modules: &patterns-components_lua_modules
   - "components/lua_modules/**/*"
 
+.patterns-components_common: &patterns-components_common
+- "components/common/**/*"
+
 # application folder, in the alphabetic order
 .patterns-application_basic_demo: &patterns-application_basic_demo
   - "application/basic_demo/**/*"
@@ -76,6 +79,8 @@
     - <<: *if-mr
       changes: *patterns-components_lua_modules
     - <<: *if-mr
+      changes: *patterns-components_common
+    - <<: *if-mr
       changes: *patterns-application_basic_demo
     - <<: *if-mr
       changes: *patterns-docs
@@ -94,6 +99,8 @@
       changes: *patterns-components_modules
     - <<: *if-mr
       changes: *patterns-components_lua_modules
+    - <<: *if-mr
+      changes: *patterns-components_common
     - <<: *if-mr
       changes: *patterns-application_edge_agent
     - <<: *if-mr

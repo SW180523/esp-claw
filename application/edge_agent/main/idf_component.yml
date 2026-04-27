@@ -34,6 +34,8 @@ dependencies:
 
   emote:
     path: ../../../components/common/emote
+    rules:
+      - if: $CONFIG{ESP_BOARD_DEV_DISPLAY_LCD_SUPPORT} == True
 
   http_server:
     path: ../components/http_server
