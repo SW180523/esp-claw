@@ -49,6 +49,12 @@
 #if CONFIG_APP_CLAW_LUA_MODULE_BOARD_MANAGER
 #include "lua_module_board_manager.h"
 #endif
+#if CONFIG_APP_CLAW_LUA_MODULE_IMU
+#include "lua_module_imu.h"
+#endif
+#if CONFIG_APP_CLAW_LUA_MODULE_TOUCH
+#include "lua_module_touch.h"
+#endif
 #if CONFIG_APP_CLAW_LUA_MODULE_MCPWM
 #include "lua_module_mcpwm.h"
 #endif
@@ -286,6 +292,22 @@ static esp_err_t app_lua_register_board_manager(const char *fatfs_base_path)
 }
 #endif
 
+#if CONFIG_APP_CLAW_LUA_MODULE_IMU
+static esp_err_t app_lua_register_imu(const char *fatfs_base_path)
+{
+    (void)fatfs_base_path;
+    return lua_module_imu_register();
+}
+#endif
+
+#if CONFIG_APP_CLAW_LUA_MODULE_TOUCH
+static esp_err_t app_lua_register_touch(const char *fatfs_base_path)
+{
+    (void)fatfs_base_path;
+    return lua_module_touch_register();
+}
+#endif
+
 #if CONFIG_APP_CLAW_LUA_MODULE_MCPWM
 static esp_err_t app_lua_register_mcpwm(const char *fatfs_base_path)
 {
@@ -368,6 +390,12 @@ static const app_lua_module_entry_t s_lua_module_entries[] = {
 #if CONFIG_APP_CLAW_LUA_MODULE_BOARD_MANAGER
     { "board_manager", "Board Manager", app_lua_register_board_manager },
 #endif
+#if CONFIG_APP_CLAW_LUA_MODULE_IMU
+    { "imu", "IMU", app_lua_register_imu },
+#endif
+#if CONFIG_APP_CLAW_LUA_MODULE_TOUCH
+    { "touch", "Touch", app_lua_register_touch },
+#endif
 #if CONFIG_APP_CLAW_LUA_MODULE_LCD_TOUCH && defined(CONFIG_ESP_BOARD_DEV_LCD_TOUCH_I2C_SUPPORT)
     { "lcd_touch", "LCD Touch", app_lua_register_lcd_touch },
 #endif
@@ -424,6 +452,12 @@ static const app_lua_module_info_t s_lua_module_infos[] = {
 #endif
 #if CONFIG_APP_CLAW_LUA_MODULE_BOARD_MANAGER
     { "board_manager", "Board Manager" },
+#endif
+#if CONFIG_APP_CLAW_LUA_MODULE_IMU
+    { "imu", "IMU" },
+#endif
+#if CONFIG_APP_CLAW_LUA_MODULE_TOUCH
+    { "touch", "Touch" },
 #endif
 #if CONFIG_APP_CLAW_LUA_MODULE_LCD_TOUCH && defined(CONFIG_ESP_BOARD_DEV_LCD_TOUCH_I2C_SUPPORT)
     { "lcd_touch", "LCD Touch" },

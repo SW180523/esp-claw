@@ -55,6 +55,7 @@ IGNORE_WARNINGS = [
     r'.+MultiCommand.+',
     r'warning: \'ISP_AWB_SAMPLE_POINT_BEFORE_CCM\' is deprecated: Use ISP_AWB_SAMPLE_POINT_0 instead \[-Wdeprecated-declarations\]',
     r'warning: \'ISP_AE_SAMPLE_POINT_AFTER_DEMOSAIC\' is deprecated: Use ISP_AE_SAMPLE_POINT_0 instead \[-Wdeprecated-declarations\]',
+    r'warning: \'touch_cst816s_read_id\' declared \'static\' but never defined \[-Wunused-function\]',
 ]
 
 class CustomApp(CMakeApp):

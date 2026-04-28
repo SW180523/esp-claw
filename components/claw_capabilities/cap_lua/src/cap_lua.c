@@ -1382,6 +1382,11 @@ esp_err_t cap_lua_register_module(const char *name, lua_CFunction open_fn)
     }
 
     if (s_module_count >= CAP_LUA_MAX_MODULES) {
+        ESP_LOGE(TAG,
+                 "Lua module registry full: tried to add '%s' with %u/%u slots used",
+                 name,
+                 (unsigned)s_module_count,
+                 (unsigned)CAP_LUA_MAX_MODULES);
         return ESP_ERR_NO_MEM;
     }
 
