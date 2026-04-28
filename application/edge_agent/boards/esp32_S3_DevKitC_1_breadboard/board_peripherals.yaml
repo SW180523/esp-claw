@@ -55,7 +55,7 @@ peripherals:
       sd_dither: 0
       sd_dither2: 1
       pins:
-        doubt: 9                    # [IO] Data output pin
+        dout: 9                    # [IO] Data output pin
       invert_flags:
         clk_inv: false
 

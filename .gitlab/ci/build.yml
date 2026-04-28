@@ -101,6 +101,9 @@ build_application_edge_agent:
         EXAMPLE_BOARD: esp32_p4_function_ev
         EXAMPLE_TARGET: esp32p4
       - IMAGE: espressif/idf:release-v5.5
+        EXAMPLE_BOARD: esp32_p4x_function_ev
+        EXAMPLE_TARGET: esp32p4
+      - IMAGE: espressif/idf:release-v5.5
         EXAMPLE_BOARD: m5stack_sticks3
         EXAMPLE_TARGET: esp32s3
       - IMAGE: espressif/idf:release-v5.5
