@@ -37,6 +37,9 @@
 #endif
 
 static const char *TAG = "app_claw";
+static const char *APP_STARTUP_EVENT_SOURCE_CAP = "app_claw";
+static const char *APP_STARTUP_EVENT_TYPE = "startup";
+static const char *APP_STARTUP_EVENT_KEY = "boot_completed";
 
 #define APP_SYSTEM_PROMPT_COMMON \
     "You are the ESP-Claw. " \
@@ -151,6 +154,19 @@ static const char *app_llm_provider_name(const app_claw_config_t *config)
         return "OpenAI";
     }
     return "Custom";
+}
+
+static esp_err_t app_claw_publish_startup_event(void)
+{
+    static const char *payload_json =
+        "{\"phase\":\"boot_completed\"}";
+
+    ESP_LOGI(TAG, "Publishing startup trigger event: %s/%s",
+             APP_STARTUP_EVENT_TYPE, APP_STARTUP_EVENT_KEY);
+    return claw_event_router_publish_trigger(APP_STARTUP_EVENT_SOURCE_CAP,
+                                             APP_STARTUP_EVENT_TYPE,
+                                             APP_STARTUP_EVENT_KEY,
+                                             payload_json);
 }
 
 static bool app_llm_is_configured(const app_claw_config_t *config)
@@ -338,6 +354,8 @@ esp_err_t app_claw_start(const app_claw_config_t *config,
 #if CONFIG_APP_CLAW_ENABLE_CLI
     ESP_RETURN_ON_ERROR(app_claw_cli_start(), TAG, "Failed to start CLI");
 #endif
+    ESP_RETURN_ON_ERROR(app_claw_publish_startup_event(), TAG,
+                        "Failed to publish startup event");
 
     return ESP_OK;
 }

@@ -10,6 +10,8 @@
   * Introduced support for fine-grained configuration controls 
   * Added a basic online chat module.
 
+* Added a boot-complete startup trigger event in the shared app and Basic Demo startup flow, plus a disabled-by-default router rule example that runs `hello.lua` on boot.
+
 * Added support for the following third-party development boards:
   * `m5stack_cores3` (PR #5, contributed by @imliubo)
   * `m5stack_sticks3` (PR #6, contributed by @imliubo)
@@ -68,14 +70,6 @@
 * Added microsecond delay support to `lua_module_delay`.
 
 * Extended `lua_module_mcpwm` with dual-channel output support, updated the MCPWM demo script, and refreshed the related skill guide.
-
-## 2026-04-21
-
-## 2026-04-28
-
-### Fix:
-
-* Reduced `httpd` task stack pressure in Edge Agent by moving large configuration and WeChat login status structures from stack allocation to heap-backed buffers across the config and WeChat HTTP handlers.
 
 ## 2026-04-21
 
