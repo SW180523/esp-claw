@@ -47,6 +47,12 @@ edge_agent_boards:
   - LicenseRef-Espressif-Modified-MIT
   license_for_new_files: Apache-2.0
 
+# Third-party boards keep their upstream license/copyright headers untouched.
+edge_agent_boards_third_party:
+  perform_check: no
+  include:
+    - 'application/edge_agent/boards/third_party/**/*'
+
 ignore:  # You can also select ignoring files here
   perform_check: no  # Don't check files from that block
   include:
