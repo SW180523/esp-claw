@@ -258,6 +258,13 @@ menu "App Claw Config"
                 Enable the I2C Lua module and keep app_claw's direct dependency
                 on lua_module_i2c when Lua capability is enabled.
 
+        config APP_CLAW_LUA_MODULE_SSD1306
+            bool "Enable SSD1306 Lua module"
+            default y
+            help
+                Enable the SSD1306 Lua module and keep app_claw's direct
+                dependency on lua_module_ssd1306 when Lua capability is enabled.
+
         config APP_CLAW_LUA_MODULE_LED_STRIP
             bool "Enable LED strip Lua module"
             default y

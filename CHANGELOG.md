@@ -18,6 +18,8 @@
   * `dfrobot_k10` (PR #28, contributed by @wxzed)
   * `lilygo_t_display_s3` (PR #14, contributed by @terry-cook)
 
+* Added shared `app_claw` support for the pure-Lua SSD1306 module, including Kconfig and dependency wiring so SSD1306 scripts and skills can be pulled into app builds that enable Lua support.
+
 * Enhanced CI board builds to support optional brand-specific board paths, emit `board_brand` in merged binary metadata, and append ESP32-P4 revision suffixes to generated merged binary artifacts while recording `rev` in the output JSON.
 
 * Increased the Claw capability tool result buffer to 32 KB so larger tool responses can be returned. Updated `cap_files` file reads to reject oversized files before reading and return an explicit error when the file exceeds the max read limit.
