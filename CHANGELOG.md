@@ -22,6 +22,8 @@
 
 * Enhanced CI board builds to support optional brand-specific board paths, emit `board_brand` in merged binary metadata, and append ESP32-P4 revision suffixes to generated merged binary artifacts while recording `rev` in the output JSON.
 
+* Added shared `app_claw` support for `lua_module_lcd`, including Kconfig, component dependency, and Lua module registration wiring so LCD scripts can be enabled from shared app builds with Lua support.
+
 * Increased the Claw capability tool result buffer to 32 KB so larger tool responses can be returned. Updated `cap_files` file reads to reject oversized files before reading and return an explicit error when the file exceeds the max read limit.
   
 * Increased Claw memory session message buffers to 4096 chars.

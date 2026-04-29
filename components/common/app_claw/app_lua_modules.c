@@ -71,6 +71,9 @@
 #if CONFIG_APP_CLAW_LUA_MODULE_DISPLAY
 #include "lua_module_display.h"
 #endif
+#if CONFIG_APP_CLAW_LUA_MODULE_LCD
+#include "lua_module_lcd.h"
+#endif
 #if CONFIG_APP_CLAW_LUA_MODULE_LCD_TOUCH && defined(CONFIG_ESP_BOARD_DEV_LCD_TOUCH_I2C_SUPPORT)
 #include "lua_module_lcd_touch.h"
 #endif
@@ -351,6 +354,14 @@ static esp_err_t app_lua_register_display(const char *fatfs_base_path)
 }
 #endif
 
+#if CONFIG_APP_CLAW_LUA_MODULE_LCD
+static esp_err_t app_lua_register_lcd(const char *fatfs_base_path)
+{
+    (void)fatfs_base_path;
+    return lua_module_lcd_register();
+}
+#endif
+
 #if CONFIG_APP_CLAW_LUA_MODULE_LCD_TOUCH && defined(CONFIG_ESP_BOARD_DEV_LCD_TOUCH_I2C_SUPPORT)
 static esp_err_t app_lua_register_lcd_touch(const char *fatfs_base_path)
 {
@@ -397,6 +408,9 @@ static const app_lua_module_entry_t s_lua_module_entries[] = {
 #endif
 #if CONFIG_APP_CLAW_LUA_MODULE_DISPLAY
     { "display", "Display", app_lua_register_display },
+#endif
+#if CONFIG_APP_CLAW_LUA_MODULE_LCD
+    { "lcd", "LCD", app_lua_register_lcd },
 #endif
 #if CONFIG_APP_CLAW_LUA_MODULE_BOARD_MANAGER
     { "board_manager", "Board Manager", app_lua_register_board_manager },
@@ -463,6 +477,9 @@ static const app_lua_module_info_t s_lua_module_infos[] = {
 #endif
 #if CONFIG_APP_CLAW_LUA_MODULE_DISPLAY
     { "display", "Display" },
+#endif
+#if CONFIG_APP_CLAW_LUA_MODULE_LCD
+    { "lcd", "LCD" },
 #endif
 #if CONFIG_APP_CLAW_LUA_MODULE_BOARD_MANAGER
     { "board_manager", "Board Manager" },

@@ -230,6 +230,13 @@ menu "App Claw Config"
                 Enable the display Lua module and keep app_claw's direct dependency
                 on lua_module_display when Lua capability is enabled.
 
+        config APP_CLAW_LUA_MODULE_LCD
+            bool "Enable LCD Lua module"
+            default n
+            help
+                Enable the LCD Lua module and keep app_claw's direct dependency
+                on lua_module_lcd when Lua capability is enabled.
+
         config APP_CLAW_LUA_MODULE_ESP_HEAP
             bool "Enable esp_heap Lua module"
             default y

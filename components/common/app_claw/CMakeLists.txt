@@ -130,6 +130,10 @@ if(CONFIG_APP_CLAW_CAP_LUA AND CONFIG_APP_CLAW_LUA_MODULE_DISPLAY)
     list(APPEND app_claw_requires lua_module_display)
 endif()
 
+if(CONFIG_APP_CLAW_CAP_LUA AND CONFIG_APP_CLAW_LUA_MODULE_LCD)
+    list(APPEND app_claw_requires lua_module_lcd)
+endif()
+
 if(CONFIG_APP_CLAW_CAP_LUA AND CONFIG_APP_CLAW_LUA_MODULE_ESP_HEAP)
     list(APPEND app_claw_requires lua_module_esp_heap)
 endif()
