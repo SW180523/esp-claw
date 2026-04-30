@@ -462,12 +462,17 @@ static bool cap_im_feishu_parse_query_param(const char *url, const char *key, ch
 static const char *cap_im_feishu_basename(const char *path)
 {
     const char *slash = NULL;
+    const char *backslash = NULL;
 
     if (!path || !path[0]) {
         return "";
     }
 
     slash = strrchr(path, '/');
+    backslash = strrchr(path, '\\');
+    if (backslash && (!slash || backslash > slash)) {
+        slash = backslash;
+    }
     return slash ? slash + 1 : path;
 }
 
@@ -1456,6 +1461,28 @@ static esp_err_t cap_im_feishu_save_attachment(const char *chat_id,
                                               sizeof(saved_path));
     if (err != ESP_OK) {
         return err;
+    }
+
+    if (strcmp(attachment_kind, "file") == 0 && original_filename && original_filename[0]) {
+        const char *original_basename = cap_im_feishu_basename(original_filename);
+        uint64_t message_hash = cap_im_feishu_fnv1a64(message_id);
+        int written;
+
+        if (original_basename[0]) {
+            written = snprintf(saved_name,
+                               sizeof(saved_name),
+                               "feishu_%08" PRIx32 "_%s",
+                               (uint32_t)message_hash,
+                               original_basename);
+            if (written < 0 || (size_t)written >= sizeof(saved_name)) {
+                return ESP_ERR_INVALID_SIZE;
+            }
+
+            written = snprintf(saved_path, sizeof(saved_path), "%s/%s", saved_dir, saved_name);
+            if (written < 0 || (size_t)written >= sizeof(saved_path)) {
+                return ESP_ERR_INVALID_SIZE;
+            }
+        }
     }
 
     err = cap_im_feishu_download_attachment(message_id,
