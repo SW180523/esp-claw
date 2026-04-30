@@ -155,8 +155,8 @@ async function request<T>(
   return (await response.text()) as unknown as T;
 }
 
-export function fetchStatus() {
-  return request<StatusInfo>('/api/status', undefined, 'Failed to load status');
+export function fetchStatus(signal?: AbortSignal) {
+  return request<StatusInfo>('/api/status', { signal }, 'Failed to load status');
 }
 
 /** Fetch a subset of the configuration, filtered by group names. */
@@ -298,6 +298,14 @@ export async function cancelWechatLogin() {
     '/api/wechat/login/cancel',
     { method: 'POST' },
     'Failed to cancel WeChat login',
+  );
+}
+
+export async function restartDevice() {
+  return request<{ ok?: boolean; message?: string }>(
+    '/api/restart',
+    { method: 'POST' },
+    'Failed to restart device',
   );
 }
 

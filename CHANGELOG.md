@@ -26,9 +26,21 @@
 
 * Added Feishu rich text `post` embedded attachment handling so inline images and media/file elements are queued through the existing attachment save flow.
 
+* Added a guided Edge Agent setup wizard for first-run configuration, covering LLM provider presets, search provider keys, and IM platform setup with built-in WeChat QR login flow.
+
+* Enhanced the Edge Agent web chat experience with local chat session persistence, file upload support, richer status and restart feedback, and updated configuration editing UI.
+
+* Refactored the docs online flashing workflow with a redesigned multi-step flash page, refreshed localized copy, and updated firmware metadata generation for the new tool flow.
+
 ### Change:
 
 * Removed the deprecated `application/basic_demo` app and its CI/build rules.
+
+* Simplified the docs flash tool implementation by consolidating firmware selection and flashing logic into the main page flow and removing the old helper modules.
+
+### Fix:
+
+* Fixed the `wifi --apply` flow so updated STA settings are applied immediately, with more reliable AP fallback and reconnect handling in `wifi_manager`.
 
 
 
